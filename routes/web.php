@@ -8,7 +8,7 @@ Route::get('/', function () {
     return redirect()->route('login');
 });
 
-// 2. Protected App Routes (Must be logged in)
+// Protected App Routes (Must be logged in)
 Route::middleware(['auth', 'verified'])->group(function () {
     
     // Main Dashboard
@@ -16,14 +16,14 @@ Route::middleware(['auth', 'verified'])->group(function () {
         return Inertia::render('Dashboard');
     })->name('dashboard');
 
-    // Your New Sales Forecast Tool
+    //  New Sales Forecast Tool
     Route::get('/forecast', function () {
         return Inertia::render('Forecast');
     })->name('forecast');
 
 });
 
-// 3. User Profile Routes
+// User Profile Routes
 Route::middleware('auth')->group(function () {
     Route::get('/profile', [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile', [ProfileController::class, 'update'])->name('profile.update');

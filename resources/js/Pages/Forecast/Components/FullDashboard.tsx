@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 
-const EXCHANGE_RATES = { AED: 1, MYR: 1.28, USD: 0.27 };
+const EXCHANGE_RATES = { AED: 1, MYR: 1.08, USD: 1 / 3.67 };
 
 export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: any) {
   const [dashCurrency, setDashCurrency] = useState<'AED' | 'MYR' | 'USD'>('AED');

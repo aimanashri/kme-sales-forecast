@@ -54,7 +54,7 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
           
           {isSidebarOpen ? <div className="px-4 pb-2 pt-6 text-[10px] font-black text-slate-300 uppercase tracking-widest opacity-80 whitespace-nowrap">Analytics & Reports</div> : <div className="w-8 mx-auto border-t border-slate-700 my-4"></div>}
           <NavButton id="dashboard-full" label="Full Dashboard" icon={PieChart} />
-          <NavButton id="actual-sales" label="Actual Sales (Weekly)" icon={TrendingUp} />
+          {/* <NavButton id="actual-sales" label="Actual Sales (Weekly)" icon={TrendingUp} /> */}
         </nav>
 
         <div className={`p-4 border-t border-slate-800 flex items-center ${isSidebarOpen ? 'gap-3' : 'flex-col gap-3 justify-center'}`}>

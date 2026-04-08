@@ -19,22 +19,27 @@ class ForecastController extends Controller
         $user = Auth::user();
         $isAdmin = $user->role_id == 2;
 
+        $allowedLobs = Lob::query()
+            ->select(
+                'lobs.lob_id',
+                'lobs.sold_to_bp',
+                'lobs.sold_to_bp_name',
+                'lobs.lob_code',
+                'lobs.lob_name',
+                'lobs.sales_representative_no',
+                'users.full_name as sales_rep_name' 
+            )
+            ->leftJoin('users', 'lobs.sales_representative_no', '=', 'users.employee_id')
+            ->when(!$isAdmin, function ($query) use ($user) {
+                // If not admin, only get LOBs assigned to this specific Sales Rep
+                $query->where('lobs.sales_representative_no', $user->employee_id);
+            })
+            ->get();
+
+        $allowedLobIds = $allowedLobs->pluck('lob_id');
+
         return Inertia::render('Forecast/Forecast', [
-            'dbLobs' => fn() => Lob::query()
-                ->select(
-                    'lobs.lob_id',
-                    'lobs.sold_to_bp',
-                    'lobs.sold_to_bp_name',
-                    'lobs.lob_code',
-                    'lobs.lob_name',
-                    'lobs.sales_representative_no',
-                    'users.name as sales_rep_name' 
-                )
-                ->leftJoin('users', 'lobs.sales_representative_no', '=', 'users.employee_id')
-                ->when(!$isAdmin, function ($query) use ($user) {
-                    $query->where('lobs.sales_representative_no', $user->employee_id);
-                })
-                ->get(),
+            'dbLobs' => fn() => $allowedLobs,
 
             'dbProducts' => fn() => Product::select(
                 'product_id',
@@ -57,9 +62,9 @@ class ForecastController extends Controller
 
             'dbPricing' => fn() => ProductPrice::select('product_id', 'lob_id', 'price')->get(),
 
-            'dbEntries' => UserPlanning::when(!$isAdmin, function ($query) use ($user) {
-                $query->where('user_id', $user->user_id);
-            })
+            'dbEntries' => UserPlanning::when(!$isAdmin, function ($query) use ($allowedLobIds) {
+                    $query->whereIn('lob_id', $allowedLobIds);
+                })
                 ->orderBy('created_at', 'desc')
                 ->get(),
 

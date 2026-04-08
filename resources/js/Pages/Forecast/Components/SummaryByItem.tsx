@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Download, Settings2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Settings2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 const USD_TO_AED_RATE = 3.67; 
 
@@ -35,11 +35,18 @@ interface VisibleCols {
     avg3m: boolean;
 }
 
+//  sorting state type 
+type SortColumn = 'salesPerson' | 'itemCode';
+type SortDirection = 'asc' | 'desc';
+
 export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries, searchTerm, user }: any) {
   const itemsPerPage = 50;
   const [masterCurrentPage, setMasterCurrentPage] = useState(1);
   const [masterMonthFilter, setMasterMonthFilter] = useState(getNextMonthString());
   
+  // sorting state
+  const [sortConfig, setSortConfig] = useState<{ key: SortColumn, direction: SortDirection }>({ key: 'itemCode', direction: 'asc' });
+
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
   
@@ -89,19 +96,42 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
       setVisibleCols((prev: VisibleCols) => ({ ...prev, [colName]: !prev[colName] }));
   };
 
-  const forecastTotalsMap = useMemo(() => {
-    const map: Record<number, number> = {};
+  // handle sort click
+  const handleSort = (key: SortColumn) => {
+      let direction: SortDirection = 'asc';
+      if (sortConfig.key === key && sortConfig.direction === 'asc') {
+          direction = 'desc';
+      }
+      setSortConfig({ key, direction });
+  };
+
+  const forecastStatsMap = useMemo(() => {
+    const map: Record<number, { qty: number, reps: Set<string> }> = {};
     dbEntries.forEach((entry: any) => {
         if (entry.planning_month === masterMonthFilter) {
             const pid = Number(entry.product_id);
-            map[pid] = (map[pid] || 0) + Number(entry.planned_quantity);
+            if (!map[pid]) map[pid] = { qty: 0, reps: new Set() };
+            
+            map[pid].qty += Number(entry.planned_quantity);
+            
+            const lob = dbLobs?.find((l: any) => l.lob_id === entry.lob_id);
+            if (lob && (lob.sales_rep_name || lob.sales_representative_no)) {
+                map[pid].reps.add(lob.sales_rep_name || lob.sales_representative_no);
+            }
         }
     });
     return map;
-  }, [dbEntries, masterMonthFilter]);
+  }, [dbEntries, masterMonthFilter, dbLobs]);
 
   const masterProducts = useMemo(() => {
-      let activeProducts = dbProducts.filter((p: any) => forecastTotalsMap[p.product_id] > 0);
+      let activeProducts = dbProducts.filter((p: any) => forecastStatsMap[p.product_id]?.qty > 0);
+
+      // Attach rep names to the product object so can sort by them
+      activeProducts = activeProducts.map((prod: any) => {
+          const stats = forecastStatsMap[prod.product_id] || { qty: 0, reps: new Set() };
+          const repNames = Array.from(stats.reps).join(', ') || '-';
+          return { ...prod, repNames };
+      });
 
       if (debouncedSearchTerm) {
           const lower = debouncedSearchTerm.toLowerCase();
@@ -114,20 +144,33 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
               (item.product_line || '').toLowerCase().includes(lower) ||
               (item.brand || '').toLowerCase().includes(lower) ||
               (item.cogs_price ? item.cogs_price.toString().toLowerCase().includes(lower) : false) ||
-              (item.cogs_currency || '').toLowerCase().includes(lower)
+              (item.cogs_currency || '').toLowerCase().includes(lower) ||
+              (item.repNames || '').toLowerCase().includes(lower) // allow searching by rep name
           );
       }
 
+      // dynamic sorting logic
       activeProducts.sort((a: any, b: any) => {
-          return (a.item_code || '').localeCompare(b.item_code || '');
+          const dir = sortConfig.direction === 'asc' ? 1 : -1;
+
+          if (sortConfig.key === 'salesPerson') {
+              const salesCompare = (a.repNames || '').localeCompare(b.repNames || '');
+              if (salesCompare !== 0) return salesCompare * dir;
+              
+              // fallback to Item Code if names match
+              return (a.item_code || '').localeCompare(b.item_code || '');
+          } else {
+              // default: Sort by Item Code
+              return (a.item_code || '').localeCompare(b.item_code || '') * dir;
+          }
       });
 
       return activeProducts;
-  }, [dbProducts, debouncedSearchTerm, forecastTotalsMap]);
+  }, [dbProducts, debouncedSearchTerm, forecastStatsMap, sortConfig]);
 
   useEffect(() => {
       setMasterCurrentPage(1);
-  }, [debouncedSearchTerm]);
+  }, [debouncedSearchTerm, sortConfig]);
 
   const totalMasterPages = Math.ceil(masterProducts.length / itemsPerPage);
   const paginatedMasterProducts = useMemo(() => {
@@ -146,16 +189,15 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
     ];
 
     const rows = masterProducts.map((prod: any, index: number) => {
- 
         let basePrice = dbPricing.find((p: any) => p.product_id === prod.product_id && p.lob_id === null);
-        if (!basePrice) basePrice = dbPricing.find((p: any) => p.product_id === prod.product_id); // Fallback to first available price
+        if (!basePrice) basePrice = dbPricing.find((p: any) => p.product_id === prod.product_id);
 
-        const totalForecast = forecastTotalsMap[prod.product_id] || 0;
+        const totalForecast = forecastStatsMap[prod.product_id]?.qty || 0;
         const safeDescription = prod.item_description ? `"${prod.item_description.replace(/"/g, '""')}"` : '""';
 
         return [
             index + 1,
-            `"${user?.full_name || '-'}"`,
+            `"${prod.repNames}"`, 
             `"${prod.product_category || '-'}"`,
             `"${prod.product_line || '-'}"`,
             `"${prod.item_group || '-'}"`,
@@ -277,13 +319,36 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                 <thead className="sticky top-0 z-20 shadow-sm">
                     <tr>
                         <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold text-center">No</th>
-                        <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Sales Person</th>
+                        
+                        {/* sortable headers */}
+                        <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold hover:bg-[#fad0b9] transition-colors cursor-pointer group" onClick={() => handleSort('salesPerson')}>
+                            <div className="flex items-center justify-between gap-2">
+                                Sales Person
+                                {sortConfig.key === 'salesPerson' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-blue-600"/> : <ArrowDown size={14} className="text-blue-600"/>) : <ArrowUpDown size={14} className="opacity-30 group-hover:opacity-100" />}
+                            </div>
+                        </th>
+                        
                         {visibleCols.category && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Product Category</th>}
                         <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Product Line</th>
                         {visibleCols.group && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Product Group</th>}
                         <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Product Model</th>
                         
-                        {visibleCols.itemCode && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Item Code</th>}
+                        {!visibleCols.itemCode ? (
+                            <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold hover:bg-[#fad0b9] transition-colors cursor-pointer group" onClick={() => handleSort('itemCode')}>
+                                <div className="flex items-center justify-between gap-2">
+                                    Item Code
+                                    {sortConfig.key === 'itemCode' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-blue-600"/> : <ArrowDown size={14} className="text-blue-600"/>) : <ArrowUpDown size={14} className="opacity-30 group-hover:opacity-100" />}
+                                </div>
+                            </th>
+                        ) : (
+                            <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold hover:bg-[#fad0b9] transition-colors cursor-pointer group" onClick={() => handleSort('itemCode')}>
+                                <div className="flex items-center justify-between gap-2">
+                                    Item Code
+                                    {sortConfig.key === 'itemCode' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-blue-600"/> : <ArrowDown size={14} className="text-blue-600"/>) : <ArrowUpDown size={14} className="opacity-30 group-hover:opacity-100" />}
+                                </div>
+                            </th>
+                        )}
+                        
                         {visibleCols.description && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Item Description</th>}
                         {visibleCols.brand && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Brand</th>}
                         
@@ -305,27 +370,54 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                     {paginatedMasterProducts.map((prod: any, idx: number) => {
-                        
                         let basePrice = dbPricing.find((p: any) => p.product_id === prod.product_id && p.lob_id === null);
-                        if (!basePrice) basePrice = dbPricing.find((p: any) => p.product_id === prod.product_id); // Fallback
+                        if (!basePrice) basePrice = dbPricing.find((p: any) => p.product_id === prod.product_id); 
 
                         const actualIdx = ((masterCurrentPage - 1) * itemsPerPage) + idx + 1;
-                        const totalForecast = forecastTotalsMap[prod.product_id] || 0;
+                        
+                        const stats = forecastStatsMap[prod.product_id] || { qty: 0, reps: new Set() };
+                        const totalForecast = stats.qty;
                         
                         const isCogsUsd = (prod.cogs_currency || '').toUpperCase() === 'USD';
                         const cogsPriceAed = isCogsUsd && prod.cogs_price ? (Number(prod.cogs_price) * USD_TO_AED_RATE).toFixed(2) : null;
 
+                        // rowspan logic for sales person 
+                        const isFirstOfSP = idx === 0 || prod.repNames !== paginatedMasterProducts[idx - 1].repNames; 
+                        
+                        let spRowSpan = 1;
+                        if (isFirstOfSP) {
+                            for (let i = idx + 1; i < paginatedMasterProducts.length; i++) {
+                                if (paginatedMasterProducts[i].repNames === prod.repNames) {
+                                    spRowSpan++;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
+
+
                         return (
                             <tr key={prod.product_id} className="hover:bg-slate-50 transition-colors">
                                 <td className="border border-slate-200 px-3 py-2 text-center text-slate-500 font-medium">{actualIdx}</td>
-                                <td className="border border-slate-200 px-3 py-2 text-slate-800 font-bold whitespace-nowrap">{user?.full_name || '-'}</td>
+                                
+                                {/* merge sales person cell */}
+                                {isFirstOfSP && (
+                                    <td rowSpan={spRowSpan} className="border border-slate-200 px-3 py-2 text-slate-800 font-bold whitespace-nowrap align-top bg-white/50 truncate max-w-[150px]" title={prod.repNames}>
+                                        {prod.repNames}
+                                    </td>
+                                )}
                                 
                                 {visibleCols.category && <td className="border border-slate-200 px-3 py-2 text-slate-700">{prod.product_category}</td>}
                                 <td className="border border-slate-200 px-3 py-2 text-slate-700">{prod.product_line}</td>
                                 {visibleCols.group && <td className="border border-slate-200 px-3 py-2 text-slate-700">{prod.item_group}</td>}
                                 <td className="border border-slate-200 px-3 py-2 text-slate-800 font-bold">{prod.product_model}</td>
                                 
-                                {visibleCols.itemCode && <td className="border border-slate-200 px-3 py-2 text-slate-500 font-mono text-[10px]">{prod.item_code}</td>}
+                                {visibleCols.itemCode ? (
+                                    <td className="border border-slate-200 px-3 py-2 text-slate-500 font-mono text-[10px]">{prod.item_code}</td>
+                                ) : (
+                                    <td className="border border-slate-200 px-3 py-2 text-slate-500 font-mono text-[10px]">{prod.item_code}</td>
+                                )}
+                                
                                 {visibleCols.description && <td className="border border-slate-200 px-3 py-2 text-slate-600 truncate max-w-xs">{prod.item_description}</td>}
                                 {visibleCols.brand && <td className="border border-slate-200 px-3 py-2 text-slate-700 font-medium">{prod.brand}</td>}
                                 

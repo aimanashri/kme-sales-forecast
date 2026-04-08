@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { ChevronLeft, ChevronRight, Download, Settings2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, Settings2, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 
 const USD_TO_AED_RATE = 3.67; 
 
@@ -18,7 +18,6 @@ function useDebounce<T>(value: T, delay: number): T {
     return debouncedValue;
 }
 
-
 interface VisibleCols {
     bpName: boolean;
     category: boolean;
@@ -33,11 +32,17 @@ interface VisibleCols {
     avg3m: boolean   
 }
 
+type SortColumn = 'salesPerson' | 'bpName';
+type SortDirection = 'asc' | 'desc';
+
 export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, searchTerm, user }: any) {
   const itemsPerPage = 50;
   const [currentPage, setCurrentPage] = useState(1);
   const [monthFilter, setMonthFilter] = useState(getNextMonthString());
   
+  // sorting state
+  const [sortConfig, setSortConfig] = useState<{ key: SortColumn, direction: SortDirection }>({ key: 'bpName', direction: 'asc' });
+
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const [isColumnMenuOpen, setIsColumnMenuOpen] = useState(false);
   
@@ -68,6 +73,14 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
       setVisibleCols((prev: VisibleCols) => ({ ...prev, [colName]: !prev[colName] }));
   };
 
+  const handleSort = (key: SortColumn) => {
+      let direction: SortDirection = 'asc';
+      if (sortConfig.key === key && sortConfig.direction === 'asc') {
+          direction = 'desc';
+      }
+      setSortConfig({ key, direction });
+  };
+
   const bpSummaryData = useMemo(() => {
       const monthEntries = dbEntries.filter((e: any) => e.planning_month === monthFilter && Number(e.planned_quantity) > 0);
 
@@ -81,6 +94,7 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
               unique_key: `${entry.lob_id}-${entry.product_id}`,
               lob_name: lob.sold_to_bp_name || '-',
               lob_code: lob.sold_to_bp || '-',
+              sales_rep_name: lob.sales_rep_name || lob.sales_representative_no || '-',
               forecast_qty: Number(entry.planned_quantity),
               ln_price: basePrice ? Number(basePrice.price) : null
           };
@@ -96,20 +110,35 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
               (item.item_description || '').toLowerCase().includes(lower) ||
               (item.product_category || '').toLowerCase().includes(lower) ||
               (item.product_line || '').toLowerCase().includes(lower) ||
-              (item.brand || '').toLowerCase().includes(lower)
+              (item.brand || '').toLowerCase().includes(lower) ||
+              (item.sales_rep_name || '').toLowerCase().includes(lower)
           );
       }
 
+      // --- dynamic sorting logic
       activeData.sort((a: any, b: any) => {
-          const bpCompare = (a.lob_name || '').localeCompare(b.lob_name || '');
-          if (bpCompare !== 0) return bpCompare;
+          const dir = sortConfig.direction === 'asc' ? 1 : -1;
+
+          if (sortConfig.key === 'salesPerson') {
+              const salesCompare = (a.sales_rep_name || '').localeCompare(b.sales_rep_name || '');
+              if (salesCompare !== 0) return salesCompare * dir;
+              
+              // fallback to group  by BP Name if Sales Persons match
+              const bpCompare = (a.lob_name || '').localeCompare(b.lob_name || '');
+              if (bpCompare !== 0) return bpCompare; 
+          } else {
+              const bpCompare = (a.lob_name || '').localeCompare(b.lob_name || '');
+              if (bpCompare !== 0) return bpCompare * dir;
+          }
+
+          // final fallback to product model
           return (a.product_model || '').localeCompare(b.product_model || '');
       });
 
       return activeData;
-  }, [dbEntries, monthFilter, dbProducts, dbLobs, dbPricing, debouncedSearchTerm]);
+  }, [dbEntries, monthFilter, dbProducts, dbLobs, dbPricing, debouncedSearchTerm, sortConfig]);
 
-  useEffect(() => setCurrentPage(1), [debouncedSearchTerm]);
+  useEffect(() => setCurrentPage(1), [debouncedSearchTerm, sortConfig]);
 
   const totalPages = Math.ceil(bpSummaryData.length / itemsPerPage);
   const paginatedData = useMemo(() => {
@@ -132,7 +161,7 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
 
         return [
             index + 1,
-            `"${user?.full_name || '-'}"`,
+            `"${item.sales_rep_name}"`, 
             `"${item.lob_name}"`,
             `"${item.lob_code}"`,
             `"${item.product_category || '-'}"`,
@@ -195,7 +224,6 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                       <div className="absolute right-0 mt-2 w-56 bg-white border border-slate-200 shadow-xl rounded-lg p-3 z-50 animate-in slide-in-from-top-2 max-h-96 overflow-y-auto custom-scrollbar">
                           <div className="text-[10px] font-black text-slate-400 uppercase tracking-wider mb-2 pb-2 border-b border-slate-100">Toggle View</div>
                           <div className="flex flex-col gap-2">
-                              {/* BP NAME TOGGLE */}
                               <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600">
                                   <input type="checkbox" checked={visibleCols.bpName} onChange={() => toggleColumn('bpName')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
                                   BP Name
@@ -263,10 +291,23 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                 <thead className="sticky top-0 z-20 shadow-sm">
                     <tr>
                         <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold text-center">No</th>
-                        <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold">Sales Person</th>
                         
-                        {/* TOGGLED BP COLUMN */}
-                        {visibleCols.bpName && <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold">BP Name</th>}
+                        {/* sortable headers*/}
+                        <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold hover:bg-[#cde4bf] transition-colors cursor-pointer group" onClick={() => handleSort('salesPerson')}>
+                            <div className="flex items-center justify-between gap-2">
+                                Sales Person
+                                {sortConfig.key === 'salesPerson' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-blue-600"/> : <ArrowDown size={14} className="text-blue-600"/>) : <ArrowUpDown size={14} className="opacity-30 group-hover:opacity-100" />}
+                            </div>
+                        </th>
+                        
+                        {visibleCols.bpName && (
+                            <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold hover:bg-[#cde4bf] transition-colors cursor-pointer group" onClick={() => handleSort('bpName')}>
+                                <div className="flex items-center justify-between gap-2">
+                                    BP Name
+                                    {sortConfig.key === 'bpName' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-blue-600"/> : <ArrowDown size={14} className="text-blue-600"/>) : <ArrowUpDown size={14} className="opacity-30 group-hover:opacity-100" />}
+                                </div>
+                            </th>
+                        )}
                         
                         {visibleCols.category && <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold">Product Category</th>}
                         <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold">Product Line</th>
@@ -296,17 +337,37 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                 <tbody className="divide-y divide-slate-100">
                     {paginatedData.map((item: any, idx: number) => {
                         const actualIdx = ((currentPage - 1) * itemsPerPage) + idx + 1;
-                        
                         const isCogsUsd = (item.cogs_currency || '').toUpperCase() === 'USD';
                         const cogsPriceAed = isCogsUsd && item.cogs_price ? (Number(item.cogs_price) * USD_TO_AED_RATE).toFixed(2) : null;
+
+                        const isFirstOfBP = idx === 0 || item.lob_code !== paginatedData[idx - 1].lob_code;
+                        
+                        let bpRowSpan = 1;
+                        if (isFirstOfBP) {
+                            for (let i = idx + 1; i < paginatedData.length; i++) {
+                                if (paginatedData[i].lob_code === item.lob_code) {
+                                    bpRowSpan++;
+                                } else {
+                                    break;
+                                }
+                            }
+                        }
 
                         return (
                             <tr key={item.unique_key} className="hover:bg-slate-50 transition-colors">
                                 <td className="border border-slate-200 px-3 py-2 text-center text-slate-500 font-medium">{actualIdx}</td>
-                                <td className="border border-slate-200 px-3 py-2 text-slate-800 font-bold whitespace-nowrap">{user?.full_name || '-'}</td>
                                 
-                                {/* TOGGLED BP COLUMN */}
-                                {visibleCols.bpName && <td className="border border-slate-200 px-3 py-2 text-blue-700 font-bold truncate max-w-[200px]" title={item.lob_name}>{item.lob_name}</td>}
+                                {isFirstOfBP && (
+                                    <td rowSpan={bpRowSpan} className="border border-slate-200 px-3 py-2 text-slate-800 font-bold whitespace-nowrap align-top bg-white/50">
+                                        {item.sales_rep_name}
+                                    </td>
+                                )}
+                                
+                                {visibleCols.bpName && isFirstOfBP && (
+                                    <td rowSpan={bpRowSpan} className="border border-slate-200 px-3 py-2 text-blue-700 font-bold align-top max-w-[200px] whitespace-normal leading-relaxed bg-white/50" title={item.lob_name}>
+                                        {item.lob_name}
+                                    </td>
+                                )}
                                 
                                 {visibleCols.category && <td className="border border-slate-200 px-3 py-2 text-slate-700">{item.product_category}</td>}
                                 <td className="border border-slate-200 px-3 py-2 text-slate-700">{item.product_line}</td>
@@ -340,14 +401,14 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                                 {visibleCols.avg6m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-700 font-medium bg-blue-50/30">{Number(item.avg_6m_sales || 0).toFixed(1)}</td>}
                                 {visibleCols.avg3m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800 font-bold bg-blue-100/20">{Number(item.avg_3m_sales || 0).toFixed(1)}</td>}
                                 
-                                <td className="border border-slate-300 bg-blue-50 px-3 py-2 text-center font-black text-sm text-blue-700">{item.forecast_qty}</td>
+                                <td className="border border-slate-300 bg-emerald-50 px-3 py-2 text-center font-black text-sm text-emerald-700">{item.forecast_qty}</td>
                             </tr>
                         );
                     })}
                     {bpSummaryData.length === 0 && (
                         <tr>
                             <td colSpan={activeColCount} className="p-10 text-center text-slate-400 italic">
-                                {searchTerm ? 'No entries match your search.' : `No forecast entries found for ${monthFilter}. Add data in the Sales Forecast tab.`}
+                                {searchTerm ? 'No entries match your search.' : `No forecast entries found for ${monthFilter}.`}
                             </td>
                         </tr>
                     )}

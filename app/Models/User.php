@@ -10,7 +10,7 @@ class User extends Authenticatable
 {
     use HasFactory, Notifiable;
 
-  
+
     protected $primaryKey = 'user_id';
 
     const CREATED_AT = 'inserted_at';
@@ -24,6 +24,10 @@ class User extends Authenticatable
         'role_id',
         'is_active',
         'microsoft_id',
+        'employee_id',
+        'department',
+        'branch',
+        'job_title',
     ];
 
     protected $hidden = [
@@ -39,7 +43,7 @@ class User extends Authenticatable
             'password' => 'hashed',
         ];
     }
-    
+
     // Optional: Add relationship to Role
     public function role()
     {

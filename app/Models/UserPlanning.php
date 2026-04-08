@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class UserPlanning extends Model
 {
     protected $primaryKey = 'user_planning_id';
-    protected $fillable = ['user_id', 'lob_id', 'product_id', 'planning_month', 'planned_quantity', 'planned_price_myr', 'planned_price_usd', 'planned_price_aed', 'total_amount'];
+    protected $fillable = ['user_id', 'lob_id', 'product_id', 'planning_month', 'planned_quantity', 'planned_price_myr', 'planned_price_usd', 'planned_price_aed', 'total_amount', 'is_confirmed'];
 
     public function user()
     {

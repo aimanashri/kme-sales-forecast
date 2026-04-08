@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Lob extends Model
 {
     protected $primaryKey = 'lob_id';
-    protected $fillable = ['sold_to_bp', 'sold_to_bp_name', 'lob_code'];
+    protected $fillable = ['sold_to_bp', 'sold_to_bp_name', 'lob_code','lob_name', 'sales_representative_no'];
 
     public function userPlannings()
     {

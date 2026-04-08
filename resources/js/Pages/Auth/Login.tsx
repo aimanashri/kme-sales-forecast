@@ -39,8 +39,7 @@ export default function Login({
     };
 
     const handleMicrosoftLogin = () => {
-        const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8000/api';
-        window.location.href = `${apiUrl}/auth/microsoft`;
+        window.location.href = '/auth/microsoft/redirect';
     };
 
     const displayError = customError || errors.email || errors.password;

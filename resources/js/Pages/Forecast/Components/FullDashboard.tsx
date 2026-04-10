@@ -260,7 +260,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
                 <table className="w-full text-xs text-right">
                     <thead className="bg-slate-100/80 text-slate-800 font-bold border-b border-slate-200">
                         <tr>
-                            <th className="px-4 py-3 text-left">Sales Rep ID</th>
+                            <th className="px-4 py-3 text-left">Sales Rep Name</th>
                             <th className="px-4 py-3 text-left">LOB</th>
                             <th className="px-4 py-3 text-left">Business Partner</th>
                             <th className="px-4 py-3">Forecast</th>

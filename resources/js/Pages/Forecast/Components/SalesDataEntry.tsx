@@ -53,8 +53,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
 
   const [recentMonthFilter, setRecentMonthFilter] = useState(getNextMonthString());
 
-  // only track standard plan price(aed) , qty, confirmed 
-  const [edits, setEdits] = useState<Record<number, { qty?: number | '', planPrice?: number | '', isConfirmed?: boolean }>>({});
+  const [edits, setEdits] = useState<Record<number, { qty?: number | '', planPrice?: number | '', confirmedQty?: number | '' }>>({});
 
   useEffect(() => {
       setGridCurrentPage(1);
@@ -118,10 +117,11 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
               
               saved_qty: existingEntry ? Number(existingEntry.planned_quantity) : '',
               saved_price: existingEntry && Number(existingEntry.planned_price_aed) !== Number(masterPrice) ? Number(existingEntry.planned_price_aed) : '',
-              is_confirmed: existingEntry ? Boolean(existingEntry.is_confirmed) : false, 
+              saved_confirmed_qty: existingEntry && existingEntry.confirmed_quantity != null ? Number(existingEntry.confirmed_quantity) : '', 
               
               prefill_qty: (!existingEntry && previousEntry) ? Number(previousEntry.planned_quantity) : '',
-              prefill_price: (!existingEntry && previousEntry && Number(previousEntry.planned_price_aed) !== Number(masterPrice)) ? Number(previousEntry.planned_price_aed) : ''
+              prefill_price: (!existingEntry && previousEntry && Number(previousEntry.planned_price_aed) !== Number(masterPrice)) ? Number(previousEntry.planned_price_aed) : '',
+              prefill_confirmed_qty: (!existingEntry && previousEntry && previousEntry.confirmed_quantity != null) ? Number(previousEntry.confirmed_quantity) : ''
           };
       });
   }, [selectedLob, planningMonth, dbProducts, dbPricing, dbEntries]);
@@ -147,10 +147,10 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
     return dbEntries.filter((entry: any) => entry.planning_month === recentMonthFilter);
   }, [dbEntries, recentMonthFilter]);
 
-  const handleEdit = (productId: number, field: 'qty' | 'planPrice' | 'isConfirmed', value: any) => {
+  const handleEdit = (productId: number, field: 'qty' | 'planPrice' | 'confirmedQty', value: any) => {
       setEdits(prev => {
           const current = prev[productId] || {}; 
-          const parsedValue = field === 'isConfirmed' ? value : (value === '' ? '' : Number(value));
+          const parsedValue = value === '' ? '' : Number(value);
           return { ...prev, [productId]: { ...current, [field]: parsedValue } };
       });
   };
@@ -162,23 +162,63 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
           const hasEdit = editData !== undefined;
           
           const rowQty = hasEdit && editData.qty !== undefined ? editData.qty : (prod.saved_qty !== '' ? prod.saved_qty : prod.prefill_qty);
-          const rowPlanPrice = hasEdit && editData.planPrice !== undefined ? editData.planPrice : (prod.saved_price !== '' ? prod.saved_price : prod.prefill_price);
-          const rowConfirmed = hasEdit && editData.isConfirmed !== undefined ? editData.isConfirmed : prod.is_confirmed;
+          const defaultPrice = prod.saved_price !== '' ? prod.saved_price : prod.prefill_price;
+          const rowPlanPrice = hasEdit && editData.planPrice !== undefined ? editData.planPrice : defaultPrice;
+          
+          const rowConfirmedQty = hasEdit && editData.confirmedQty !== undefined ? editData.confirmedQty : (prod.saved_confirmed_qty !== '' ? prod.saved_confirmed_qty : prod.prefill_confirmed_qty);
           
           const activePrice = rowPlanPrice !== '' && Number(rowPlanPrice) > 0 ? Number(rowPlanPrice) : prod.master_price_aed;
 
           const isQtyChanged = Number(rowQty || 0) !== Number(prod.saved_qty || 0);
           const isPriceChanged = Number(activePrice) !== Number(prod.saved_price || prod.master_price_aed);
-          const isConfirmedChanged = rowConfirmed !== prod.is_confirmed;
+          const isConfirmedQtyChanged = Number(rowConfirmedQty || 0) !== Number(prod.saved_confirmed_qty || 0);
           const isUnsavedPrefill = prod.saved_qty === '' && prod.prefill_qty !== '';
           
-          const hasActualChanges = isQtyChanged || isPriceChanged || isConfirmedChanged || isUnsavedPrefill;
+          const hasActualChanges = isQtyChanged || isPriceChanged || isConfirmedQtyChanged || isUnsavedPrefill;
           const hasValidQty = rowQty !== '' && Number(rowQty) > 0;
 
           if (hasActualChanges && hasValidQty) count++;
       });
       return count;
   }, [baseGridProducts, edits]);
+
+  const gridTotals = useMemo(() => {
+      let totalFcastQty = 0;
+      let totalConfQty = 0;
+      let totalPlanPrice = 0; 
+      let totalAed = 0;
+      let totalGp = 0;
+
+      filteredGridProducts.forEach((prod: any) => {
+          const editData = edits[prod.product_id];
+          const isEditing = editData !== undefined;
+          
+          const rowQty = isEditing && editData.qty !== undefined ? editData.qty : (prod.saved_qty !== '' ? prod.saved_qty : prod.prefill_qty);
+          const defaultPrice = prod.saved_price !== '' ? prod.saved_price : prod.prefill_price;
+          const rowPlanPrice = isEditing && editData.planPrice !== undefined ? editData.planPrice : defaultPrice;
+          const rowConfirmedQty = isEditing && editData.confirmedQty !== undefined ? editData.confirmedQty : (prod.saved_confirmed_qty !== '' ? prod.saved_confirmed_qty : prod.prefill_confirmed_qty);
+          
+          const activePrice = rowPlanPrice !== '' && Number(rowPlanPrice) > 0 ? Number(rowPlanPrice) : prod.master_price_aed;
+          const qtyNum = rowQty !== '' ? Number(rowQty) : 0;
+          const confQtyNum = rowConfirmedQty !== '' && !isNaN(Number(rowConfirmedQty)) ? Number(rowConfirmedQty) : 0;
+          
+          const totalVal = qtyNum * activePrice;
+          const gpVal = (activePrice - prod.cogs_price_aed) * qtyNum;
+
+          totalFcastQty += qtyNum;
+          totalConfQty += confQtyNum;
+          
+          // --- FIX: ONLY sum the explicitly typed/saved plan prices ---
+          if (rowPlanPrice !== '') {
+              totalPlanPrice += Number(rowPlanPrice);
+          }
+          
+          totalAed += totalVal;
+          totalGp += gpVal;
+      });
+
+      return { totalFcastQty, totalConfQty, totalPlanPrice, totalAed, totalGp };
+  }, [filteredGridProducts, edits]);
 
   const handleSaveAll = (e: React.FormEvent) => {
       e.preventDefault();
@@ -191,17 +231,18 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
           const hasEdit = editData !== undefined;
           
           const rowQty = hasEdit && editData.qty !== undefined ? editData.qty : (prod.saved_qty !== '' ? prod.saved_qty : prod.prefill_qty);
-          const rowPlanPrice = hasEdit && editData.planPrice !== undefined ? editData.planPrice : (prod.saved_price !== '' ? prod.saved_price : prod.prefill_price);
-          const rowConfirmed = hasEdit && editData.isConfirmed !== undefined ? editData.isConfirmed : prod.is_confirmed;
+          const defaultPrice = prod.saved_price !== '' ? prod.saved_price : prod.prefill_price;
+          const rowPlanPrice = hasEdit && editData.planPrice !== undefined ? editData.planPrice : defaultPrice;
+          const rowConfirmedQty = hasEdit && editData.confirmedQty !== undefined ? editData.confirmedQty : (prod.saved_confirmed_qty !== '' ? prod.saved_confirmed_qty : prod.prefill_confirmed_qty);
           
           const activePrice = rowPlanPrice !== '' && Number(rowPlanPrice) > 0 ? Number(rowPlanPrice) : prod.master_price_aed;
 
           const isQtyChanged = Number(rowQty || 0) !== Number(prod.saved_qty || 0);
           const isPriceChanged = Number(activePrice) !== Number(prod.saved_price || prod.master_price_aed);
-          const isConfirmedChanged = rowConfirmed !== prod.is_confirmed;
+          const isConfirmedQtyChanged = Number(rowConfirmedQty || 0) !== Number(prod.saved_confirmed_qty || 0);
           const isUnsavedPrefill = prod.saved_qty === '' && prod.prefill_qty !== '';
 
-          const hasActualChanges = isQtyChanged || isPriceChanged || isConfirmedChanged || isUnsavedPrefill;
+          const hasActualChanges = isQtyChanged || isPriceChanged || isConfirmedQtyChanged || isUnsavedPrefill;
           const hasValidQty = rowQty !== '' && Number(rowQty) > 0;
 
           if (hasActualChanges && hasValidQty) {
@@ -214,7 +255,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                   planned_price_myr: Number((activePrice * EXCHANGE_RATES.MYR).toFixed(2)),
                   planned_price_usd: Number((activePrice / USD_TO_AED_RATE).toFixed(2)), 
                   total_amount: Number((Number(rowQty) * activePrice).toFixed(2)),
-                  is_confirmed: rowConfirmed
+                  confirmed_quantity: Number(rowConfirmedQty || 0)
               });
           }
       });
@@ -238,7 +279,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
 
   const exportEntriesToCSV = () => {
     if (filteredEntries.length === 0) return showNotification('No entries to export.');
-    const headers = ['Month', 'BP Code', 'Product Line', 'Model', 'Plan Qty', 'Status', 'Net Sales (AED)'];
+    const headers = ['Month', 'BP Code', 'Product Line', 'Model', 'Plan Qty', 'Conf Qty', 'Net Sales (AED)'];
     const rows = filteredEntries.map((entry: any) => {
         const bp = dbLobs.find((l:any) => l.lob_id === entry.lob_id)?.sold_to_bp || 'Unknown';
         const productMatch = dbProducts.find((p:any) => p.product_id === entry.product_id);
@@ -249,7 +290,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
             `"${productMatch?.product_line || 'Unknown'}"`, 
             `"${productMatch?.product_model || 'Unknown'}"`, 
             entry.planned_quantity, 
-            entry.is_confirmed ? 'Confirmed' : 'Forecast',
+            entry.confirmed_quantity != null ? entry.confirmed_quantity : 0, 
             aedAmount.toFixed(2)
         ].join(',');
     });
@@ -345,9 +386,9 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100">LOB</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100 text-right">Price AED</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100 text-right">COGS AED</th>
-                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-blue-50 text-blue-700 text-center border-l border-l-slate-200 w-32 shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]">Forecast Qty</th>
+                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-blue-50 text-blue-700 text-center border-l border-l-slate-200 w-32 shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]">Fcast Qty</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-blue-50 text-blue-700 text-center w-32">Plan Price AED</th>
-                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-blue-50 text-blue-800 text-center w-24 border-x border-slate-200">Confirm</th>
+                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-emerald-50 text-emerald-700 text-center w-32 border-x border-slate-200">Conf Qty</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-50 text-slate-800 text-right w-32">Total AED</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-purple-50 text-purple-800 text-right w-32 border-l border-slate-200">GP (AED)</th>
                         </tr>
@@ -358,8 +399,11 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                             const isEditing = editData !== undefined;
                             
                             const rowQty = isEditing && editData.qty !== undefined ? editData.qty : (prod.saved_qty !== '' ? prod.saved_qty : prod.prefill_qty);
-                            const rowPlanPrice = isEditing && editData.planPrice !== undefined ? editData.planPrice : (prod.saved_price !== '' ? prod.saved_price : prod.prefill_price);
-                            const rowConfirmed = isEditing && editData.isConfirmed !== undefined ? editData.isConfirmed : prod.is_confirmed;
+                            
+                            const defaultPrice = prod.saved_price !== '' ? prod.saved_price : prod.prefill_price;
+                            const rowPlanPrice = isEditing && editData.planPrice !== undefined ? editData.planPrice : defaultPrice;
+                            
+                            const rowConfirmedQty = isEditing && editData.confirmedQty !== undefined ? editData.confirmedQty : (prod.saved_confirmed_qty !== '' ? prod.saved_confirmed_qty : prod.prefill_confirmed_qty);
                             const isPrefilled = prod.saved_qty === '' && prod.prefill_qty !== '' && (!isEditing || editData.qty === undefined);
                             
                             const activePrice = rowPlanPrice !== '' && Number(rowPlanPrice) > 0 ? Number(rowPlanPrice) : prod.master_price_aed;
@@ -369,11 +413,10 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                             const gpVal = (activePrice - prod.cogs_price_aed) * qtyNum;
                             const actualIdx = ((gridCurrentPage - 1) * itemsPerPage) + idx + 1;
 
-                            // Highlight row if any edits exist
                             const isQtyChanged = Number(rowQty || 0) !== Number(prod.saved_qty || 0);
                             const isPriceChanged = Number(activePrice) !== Number(prod.saved_price || prod.master_price_aed);
-                            const isConfirmedChanged = rowConfirmed !== prod.is_confirmed;
-                            const isRowModified = isQtyChanged || isPriceChanged || isConfirmedChanged;
+                            const isConfirmedQtyChanged = Number(rowConfirmedQty || 0) !== Number(prod.saved_confirmed_qty || 0);
+                            const isRowModified = isQtyChanged || isPriceChanged || isConfirmedQtyChanged;
 
                             return (
                                 <tr key={prod.product_id} className={`transition-colors ${isRowModified ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
@@ -413,12 +456,13 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                                         />
                                     </td>
 
-                                    <td className="px-4 py-2 text-center border-x border-slate-200">
+                                    <td className="px-3 py-1.5 border-x border-slate-200">
                                         <input 
-                                            type="checkbox" 
-                                            checked={rowConfirmed}
-                                            onChange={(e) => handleEdit(prod.product_id, 'isConfirmed', e.target.checked)}
-                                            className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
+                                            type="number" min="0" 
+                                            value={rowConfirmedQty} 
+                                            onChange={(e) => handleEdit(prod.product_id, 'confirmedQty', e.target.value)}
+                                            placeholder="0"
+                                            className="w-full border-slate-300 rounded text-center text-xs h-7 focus:ring-emerald-500 font-bold transition-colors"
                                         />
                                     </td>
                                     
@@ -436,6 +480,19 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                             <tr><td colSpan={12} className="px-4 py-12 text-center text-slate-400 italic">No products found matching your filter.</td></tr>
                         )}
                     </tbody>
+                    
+                    {filteredGridProducts.length > 0 && (
+                        <tfoot className="sticky bottom-0 z-20 shadow-[0_-1px_3px_rgba(0,0,0,0.05)] bg-slate-100 font-bold text-[11px] text-slate-700">
+                            <tr>
+                                <td colSpan={7} className="px-4 py-3 text-right uppercase tracking-wider">Total (All Pages)</td>
+                                <td className="px-3 py-3 text-center text-blue-700 border-l border-slate-200">{gridTotals.totalFcastQty}</td>
+                                <td className="px-3 py-3 text-right text-slate-800 border-x border-slate-200">{gridTotals.totalPlanPrice > 0 ? gridTotals.totalPlanPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                <td className="px-3 py-3 text-center text-emerald-700 border-r border-slate-200">{gridTotals.totalConfQty}</td>
+                                <td className="px-4 py-3 text-right text-slate-800">{gridTotals.totalAed > 0 ? gridTotals.totalAed.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                <td className="px-4 py-3 text-right text-purple-700 border-l border-slate-200">{gridTotals.totalGp !== 0 ? gridTotals.totalGp.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                            </tr>
+                        </tfoot>
+                    )}
                 </table>
             )}
           </div>
@@ -476,7 +533,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                 <th className="px-6 py-4 bg-white">Product Line</th>
                 <th className="px-6 py-4 bg-white">Model</th>
                 <th className="px-6 py-4 text-center bg-white">Plan Qty</th>
-                <th className="px-6 py-4 text-right bg-white">Status</th>
+                <th className="px-6 py-4 text-center bg-white text-emerald-700">Conf Qty</th>
                 <th className="px-6 py-4 text-right bg-white">Net Sales (AED)</th>
               </tr>
             </thead>
@@ -488,11 +545,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                   <td className="px-6 py-4 text-slate-600">{dbProducts.find((p:any) => p.product_id === entry.product_id)?.product_line || '-'}</td>
                   <td className="px-6 py-4 text-slate-600">{dbProducts.find((p:any) => p.product_id === entry.product_id)?.product_model}</td>
                   <td className="px-6 py-4 text-center font-bold">{entry.planned_quantity}</td>
-                  <td className="px-6 py-4 text-right font-black">
-                      <span className={`px-2 py-1 rounded text-[9px] uppercase tracking-wider ${entry.is_confirmed ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'}`}>
-                          {entry.is_confirmed ? 'Confirmed' : 'Forecast'}
-                      </span>
-                  </td>
+                  <td className="px-6 py-4 text-center font-bold text-emerald-600">{entry.confirmed_quantity != null ? entry.confirmed_quantity : 0}</td>
                   <td className="px-6 py-4 text-right font-black text-blue-600">{Number(entry.total_amount).toFixed(2)}</td>
                 </tr>
               ))}

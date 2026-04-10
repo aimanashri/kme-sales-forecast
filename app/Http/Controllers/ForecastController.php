@@ -88,7 +88,7 @@ class ForecastController extends Controller
             'entries.*.planned_price_usd' => 'required|numeric',
             'entries.*.planned_price_aed' => 'required|numeric',
             'entries.*.total_amount' => 'required|numeric',
-            'entries.*.is_confirmed' => 'required|boolean',
+            'entries.*.confirmed_quantity' => 'required|integer|min:0',
         ]);
 
         $userId = Auth::user()->user_id;
@@ -108,7 +108,7 @@ class ForecastController extends Controller
                         'planned_price_myr' => $entry['planned_price_myr'],
                         'planned_price_usd' => $entry['planned_price_usd'],
                         'total_amount' => $entry['total_amount'],
-                        'is_confirmed' => $entry['is_confirmed'],
+                        'confirmed_quantity' => $entry['confirmed_quantity'] ?? 0,
                     ]
                 );
             }

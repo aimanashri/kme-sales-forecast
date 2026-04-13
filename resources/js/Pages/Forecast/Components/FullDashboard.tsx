@@ -2,12 +2,13 @@ import React, { useState, useMemo } from 'react';
 
 const EXCHANGE_RATES = { AED: 1, MYR: 1.08, USD: 1 / 3.67 };
 
-export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: any) {
+export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualSales = [], user }: any) {
   const [dashCurrency, setDashCurrency] = useState<'AED' | 'MYR' | 'USD'>('AED');
   
-  // --- dynamic sales person---
   const [dashFilters, setDashFilters] = useState({
-      year: 'All', month: 'All', lob: 'All', 
+      year: new Date().getFullYear().toString(), // get the current year 
+      month: String(new Date().getMonth() + 1).padStart(2, '0'), // get the current month
+      lob: 'All', 
       salesPerson: user.role_id === 2 ? 'All' : user.employee_id, 
       businessPartner: 'All',
       brand: 'All', productLine: 'All', productCategory: 'All', productGroup: 'All', productModel: 'All', itemCode: 'All'
@@ -44,7 +45,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
         lobs: Array.from(lobsMap.entries()).map(([code, name]) => ({ code, name })).sort((a,b) => a.code.localeCompare(b.code)),
         bps: Array.from(bps).sort(), brands: Array.from(brands).sort(), pLines: Array.from(pLines).sort(),
         pCats: Array.from(pCats).sort(), pGroups: Array.from(pGroups).sort(), pModels: Array.from(pModels).sort(), itemCodes: Array.from(itemCodes).sort(),
-        salesReps: Array.from(salesReps).sort() // Send sorted reps to the dropdown
+        salesReps: Array.from(salesReps).sort()
     };
   }, [dbEntries, dbLobs, dbProducts]);
 
@@ -57,8 +58,6 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
         const lob = dbLobs.find((l: any) => l.lob_id === entry.lob_id);
         if (dashFilters.lob !== 'All' && lob?.lob_code !== dashFilters.lob) return false;
         if (dashFilters.businessPartner !== 'All' && lob?.sold_to_bp_name !== dashFilters.businessPartner) return false;
-        
-        //  sales person filter
         if (dashFilters.salesPerson !== 'All' && lob?.sales_representative_no !== dashFilters.salesPerson) return false;
         
         const product = dbProducts.find((p: any) => p.product_id === entry.product_id);
@@ -72,8 +71,30 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
         return true;
     });
 
+    //  actual sales filter
+    let filteredActuals = dbActualSales.filter((actual: any) => {
+        const [y, m] = actual.invoice_date.split('-');
+        if (dashFilters.year !== 'All' && y !== dashFilters.year) return false;
+        if (dashFilters.month !== 'All' && m !== dashFilters.month) return false;
+        
+        const lob = dbLobs.find((l: any) => l.lob_id === actual.lob_id);
+        if (dashFilters.lob !== 'All' && lob?.lob_code !== dashFilters.lob) return false;
+        if (dashFilters.businessPartner !== 'All' && lob?.sold_to_bp_name !== dashFilters.businessPartner) return false;
+        if (dashFilters.salesPerson !== 'All' && actual.sales_representative_no !== dashFilters.salesPerson) return false;
+
+        const product = dbProducts.find((p: any) => p.product_id === actual.product_id);
+        if (dashFilters.brand !== 'All' && product?.brand !== dashFilters.brand) return false;
+        if (dashFilters.productLine !== 'All' && product?.product_line !== dashFilters.productLine) return false;
+        if (dashFilters.productCategory !== 'All' && product?.product_category !== dashFilters.productCategory) return false;
+        if (dashFilters.productGroup !== 'All' && product?.item_group !== dashFilters.productGroup) return false;
+        if (dashFilters.productModel !== 'All' && product?.product_model !== dashFilters.productModel) return false;
+        if (dashFilters.itemCode !== 'All' && product?.item_code !== dashFilters.itemCode) return false;
+
+        return true;
+    });
+
     let forecastTotal = 0; let actualTotal = 0; let totalOnHand = 0;
-    const tableGroups: Record<string, any> = {};
+    const tableGroups: Record<string, any> = {}; 
 
     filteredForDash.forEach((entry: any) => {
         const lob = dbLobs.find((l: any) => l.lob_id === entry.lob_id);
@@ -81,17 +102,26 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
         const salesRep = lob?.sales_rep_name || lob?.sales_representative_no || '-'; 
         const baseAmount = Number(entry.total_amount);
         const currMult = EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES];
-        
         const convertedAmount = baseAmount * currMult;
         forecastTotal += convertedAmount;
-        
-        const mockActual = convertedAmount * 1.0572; 
-        actualTotal += mockActual;
-
-        // Add Sales Rep to the grouped table data 
         if (!tableGroups[bpName]) { tableGroups[bpName] = { bpName, lobName: lob?.lob_name || 'Unknown', salesRep, forecast: 0, actual: 0 }; }
         tableGroups[bpName].forecast += convertedAmount;
-        tableGroups[bpName].actual += mockActual;
+    });
+
+    // group  Actuals by BP
+    filteredActuals.forEach((actual: any) => {
+        const lob = dbLobs.find((l: any) => l.lob_id === actual.lob_id);
+        const bpName = lob?.sold_to_bp_name || 'Unknown';
+        const salesRep = lob?.sales_rep_name || lob?.sales_representative_no || actual.sales_representative_no || '-';
+        
+        const baseAmount = Number(actual.sales); 
+        const currMult = EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES]; 
+        const convertedAmount = baseAmount * currMult;
+
+        actualTotal += convertedAmount;
+
+        if (!tableGroups[bpName]) { tableGroups[bpName] = { bpName, lobName: lob?.lob_name || 'Unknown', salesRep, forecast: 0, actual: 0 }; }
+        tableGroups[bpName].actual += convertedAmount;
     });
 
     const uniqueProductIdsInView = new Set(filteredForDash.map((entry: any) => entry.product_id));
@@ -100,8 +130,13 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
         if (p) totalOnHand += Number(p.total_qty || 0);
     });
 
-    return { forecastTotal, actualTotal, totalOnHand, tableData: Object.values(tableGroups).sort((a: any, b: any) => b.forecast - a.forecast) };
-  }, [dbEntries, dbProducts, dbLobs, dashFilters, dashCurrency]);
+    return { 
+        forecastTotal, 
+        actualTotal, 
+        totalOnHand, 
+        tableData: Object.values(tableGroups).sort((a: any, b: any) => b.forecast - a.forecast) 
+    };
+  }, [dbEntries, dbActualSales, dbProducts, dbLobs, dashFilters, dashCurrency]);
 
 
   const maxChartValue = useMemo(() => {
@@ -133,7 +168,6 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
                     </select>
                 </div>
                 
-                {/* dynamic admin sales person dropdown  */}
                 <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Sales Rep ID</label>
                     <select 
@@ -275,9 +309,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
                             const pct = row.forecast > 0 ? ((row.actual / row.forecast) * 100).toFixed(2) : '0.00';
                             return (
                                 <tr key={row.bpName} className="hover:bg-slate-50">
-                                    {/* Display exact Sales Rep ID for the row  */}
                                     <td className="px-4 py-2.5 font-bold text-slate-500 text-left">{row.salesRep}</td>
-                                    
                                     <td className="px-4 py-2.5 font-bold text-slate-700 text-left">{row.lobName}</td>
                                     <td className="px-4 py-2.5 text-slate-600 text-left truncate max-w-[250px]">{row.bpName}</td>
                                     <td className="px-4 py-2.5 font-mono">{row.forecast.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
@@ -289,15 +321,15 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
                         })}
                         {fullDashboardData.tableData.length > 0 && (
                             <tr className="bg-slate-100/50 font-bold border-t-2 border-slate-200">
-                                <td colSpan={3} className="px-4 py-3 text-left">Total</td>
-                                <td className="px-4 py-3 font-mono">{fullDashboardData.forecastTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                                <td className="px-4 py-3 font-mono">{fullDashboardData.actualTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                                <td className="px-4 py-3 font-mono">{((fullDashboardData.actualTotal - fullDashboardData.forecastTotal) > 0 ? '+' : '')}{(fullDashboardData.actualTotal - fullDashboardData.forecastTotal).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
-                                <td className="px-4 py-3 font-mono">{fullDashboardData.forecastTotal > 0 ? ((fullDashboardData.actualTotal / fullDashboardData.forecastTotal) * 100).toFixed(2) : '0.00'}%</td>
+                                <td colSpan={3} className="px-4 py-3 text-left text-slate-800">Total</td>
+                                <td className="px-4 py-3 font-mono text-slate-800">{fullDashboardData.forecastTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                <td className="px-4 py-3 font-mono text-slate-800">{fullDashboardData.actualTotal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                <td className={`px-4 py-3 font-mono ${((fullDashboardData.actualTotal - fullDashboardData.forecastTotal) >= 0) ? 'text-slate-800' : 'text-rose-600'}`}>{((fullDashboardData.actualTotal - fullDashboardData.forecastTotal) > 0 ? '+' : '')}{(fullDashboardData.actualTotal - fullDashboardData.forecastTotal).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                <td className="px-4 py-3 font-mono text-slate-800">{fullDashboardData.forecastTotal > 0 ? ((fullDashboardData.actualTotal / fullDashboardData.forecastTotal) * 100).toFixed(2) : '0.00'}%</td>
                             </tr>
                         )}
                         {fullDashboardData.tableData.length === 0 && (
-                            <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No forecast data matches the selected filters.</td></tr>
+                            <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No forecast or actual data matches the selected filters.</td></tr>
                         )}
                     </tbody>
                 </table>
@@ -306,4 +338,3 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, user }: a
     </div>
   );
 }
-

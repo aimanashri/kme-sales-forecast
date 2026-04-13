@@ -7,6 +7,7 @@ use App\Models\Product;
 use App\Models\ProductPrice;
 use App\Models\UserPlanning;
 use App\Models\CategoryBudget;
+use App\Models\ActualSale;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -71,6 +72,8 @@ class ForecastController extends Controller
             'dbBudgets' => CategoryBudget::when(!$isAdmin, function($query) use($user) {
                 $query->where('user_id', $user->user_id);
             })->get(),
+
+            'dbActualSales' => ActualSale::all(),
         ]);
     }
 

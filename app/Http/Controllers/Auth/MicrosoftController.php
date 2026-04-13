@@ -43,6 +43,7 @@ class MicrosoftController extends Controller
                 'department'        => $profile['department'] ?? null,
                 'branch'            => $profile['officeLocation'] ?? null,
                 'job_title'         => $profile['jobTitle'] ?? null,
+                'company_name'      => $profile['companyName'] ?? null,
                 'email_verified_at' => now(),
                 'password'          => null,
             ]

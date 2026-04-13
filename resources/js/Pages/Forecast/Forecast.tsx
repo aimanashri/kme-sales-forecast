@@ -7,13 +7,12 @@ import SummaryByBP from './Components/SummaryByBP';
 import FullDashboard from './Components/FullDashboard';
 import ActualSales from './Components/ActualSales';
 
-export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = [], dbBudgets = [] }: any) {
+export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = [], dbBudgets = [], dbActualSales = [] }: any) {
   const user = usePage().props.auth.user as any; 
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('data-entry'); 
   
-  // Shared Header States
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
@@ -32,7 +31,6 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
     <div className="flex h-screen bg-slate-50 font-sans text-slate-800 overflow-hidden animate-in fade-in duration-300">
       <Head title="Sales Forecast" />
       
-      {/* side bar */}
       <aside className={`bg-slate-900 text-white flex flex-col shadow-xl transition-all duration-300 ease-in-out shrink-0 z-20 ${isSidebarOpen ? 'w-64' : 'w-20'}`} style={{ zoom: 0.80 }}>
         <div className={`p-6 border-b border-slate-800 flex items-center h-20 transition-all ${isSidebarOpen ? 'gap-3 justify-start' : 'px-0 justify-center'}`}>
             <Link href={route('dashboard')}>
@@ -54,14 +52,12 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
           
           {isSidebarOpen ? <div className="px-4 pb-2 pt-6 text-[10px] font-black text-slate-300 uppercase tracking-widest opacity-80 whitespace-nowrap">Analytics & Reports</div> : <div className="w-8 mx-auto border-t border-slate-700 my-4"></div>}
           <NavButton id="dashboard-full" label="Full Dashboard" icon={PieChart} />
-          {/* <NavButton id="actual-sales" label="Actual Sales (Weekly)" icon={TrendingUp} /> */}
         </nav>
 
         <div className={`p-4 border-t border-slate-800 flex items-center ${isSidebarOpen ? 'gap-3' : 'flex-col gap-3 justify-center'}`}>
           <div className="w-10 h-10 shrink-0 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold uppercase">{user.full_name?.charAt(0) || 'U'}</div>
           {isSidebarOpen && (
             <div className="flex-1 overflow-hidden">
-              {/*   Admin Badge --- */}
               <div className="text-sm font-medium text-white truncate">
                   {user.full_name} 
                   {user.role_id === 2 && <span className="text-emerald-400 text-xs ml-1 font-bold">(Admin)</span>}
@@ -73,7 +69,6 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
         </div>
       </aside>
 
-      {/* main content */}
       <main className="flex-1 flex flex-col h-full overflow-hidden relative bg-slate-50">
         <header className="bg-white border-b border-gray-200 h-16 flex items-center justify-between px-6 shadow-sm shrink-0" style={{ zoom: 0.80 }}>
           <div className="flex items-center gap-4">
@@ -100,10 +95,9 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
         <div className="flex-1 overflow-auto p-6" style={{ zoom: 0.80 }}>
           {activeTab === 'data-entry' && <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} />}
           {activeTab === 'summary-item' && <SummaryByItem dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />}
-          
           {activeTab === 'summary-bp' && <SummaryByBP dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />}
           
-          {activeTab === 'dashboard-full' && <FullDashboard dbLobs={dbLobs} dbProducts={dbProducts} dbEntries={dbEntries} user={user} />}
+          {activeTab === 'dashboard-full' && <FullDashboard dbLobs={dbLobs} dbProducts={dbProducts} dbEntries={dbEntries} dbActualSales={dbActualSales} user={user} />}
           {activeTab === 'actual-sales' && <ActualSales dbProducts={dbProducts} dbEntries={dbEntries} dbBudgets={dbBudgets} selectedYear={selectedYear} user={user} />}
         </div>
       </main>

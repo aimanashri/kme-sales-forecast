@@ -159,6 +159,52 @@ class SyncRedshiftMasterData extends Command
             });
         });
 
+
+        $this->info('Syncing Actual Sales...');
+        DB::connection('redshift')->table('khind_rz.vw_kme_apps_actual_sales_by_salesrep_2024_onwards')
+            ->orderBy('invoice_date')
+            ->chunk(1000, function ($actuals) use ($productMap, $lobMap) { 
+                $actualSalesData = [];
+                
+                foreach ($actuals as $actual) {
+                    $productId = $productMap[$actual->item_code] ?? null;
+                    if (!$productId) continue; 
+
+                    //  Map the Redshift BP Code to  local lob_id
+                    $lobId = $lobMap[$actual->sold_to_bp_code] ?? null;
+
+                    $repNo = $actual->sales_representative_no ?? 'Unknown';
+
+                    // Update unique key to include lob_id
+                    $lobKeyPart = $lobId ?: 'null';
+                    $uniqueKey = $productId . '_' . $lobKeyPart . '_' . $repNo . '_' . $actual->invoice_date;
+
+                    // Add quantities and sales together for same day matching lines
+                    if (isset($actualSalesData[$uniqueKey])) {
+                        $actualSalesData[$uniqueKey]['quantities'] += (int) $actual->quantities;
+                        $actualSalesData[$uniqueKey]['sales']      += (float) $actual->sales;
+                    } else {
+                        $actualSalesData[$uniqueKey] = [
+                            'product_id'              => $productId,
+                            'lob_id'                  => $lobId, 
+                            'sales_representative_no' => $repNo,
+                            'invoice_date'            => $actual->invoice_date,
+                            'quantities'              => (int) $actual->quantities,
+                            'sales'                   => (float) $actual->sales,
+                        ];
+                    }
+                } 
+                
+                if(!empty($actualSalesData)) {
+                    \App\Models\ActualSale::upsert(
+                        array_values($actualSalesData), 
+                        ['product_id', 'lob_id', 'sales_representative_no', 'invoice_date'], // Updated unique columns
+                        ['quantities', 'sales'] 
+                    );
+                }
+            });
+
+
         $this->info('Sync Complete! Your local database is up to date.');
     }  
 }

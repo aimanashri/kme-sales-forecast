@@ -1,19 +1,46 @@
 import React, { useState, useMemo } from 'react';
 
 const EXCHANGE_RATES = { AED: 1, MYR: 1.08, USD: 1 / 3.67 };
+const CHART_COLORS = ['#ec4899', '#8b5cf6', '#4f46e5', '#3b82f6', '#0ea5e9', '#10b981', '#f59e0b', '#f97316', '#ef4444', '#14b8a6'];
 
-export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualSales = [], user }: any) {
+export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEntries, dbActualSales = [], user }: any) {
   const [dashCurrency, setDashCurrency] = useState<'AED' | 'MYR' | 'USD'>('AED');
   
   const [dashFilters, setDashFilters] = useState({
-      year: new Date().getFullYear().toString(), // get the current year 
-      month: String(new Date().getMonth() + 1).padStart(2, '0'), // get the current month
+      year: new Date().getFullYear().toString(), 
+      month: String(new Date().getMonth() + 1).padStart(2, '0'),
       lob: 'All', 
       salesPerson: user.role_id === 2 ? 'All' : user.employee_id, 
       businessPartner: 'All',
       brand: 'All', productLine: 'All', productCategory: 'All', productGroup: 'All', productModel: 'All', itemCode: 'All'
   });
 
+
+  // use hash map for lookups
+  const lobsById = useMemo(() => {
+      const map = new Map();
+      (dbLobs || []).forEach((l: any) => map.set(l.lob_id, l));
+      return map;
+  }, [dbLobs]);
+
+  const productsById = useMemo(() => {
+      const map = new Map();
+      (dbProducts || []).forEach((p: any) => map.set(p.product_id, p));
+      return map;
+  }, [dbProducts]);
+
+  const pricingByProductId = useMemo(() => {
+      const map = new Map();
+      (dbPricing || []).forEach((p: any) => {
+          if (!map.has(p.product_id) || p.lob_id === null) {
+              map.set(p.product_id, Number(p.price || 0));
+          }
+      });
+      return map;
+  }, [dbPricing]);
+
+
+  // filter dropdown
   const dashboardFilterOptions = useMemo(() => {
     const lobsMap = new Map<string, string>(); 
     const bps = new Set<string>();
@@ -23,110 +50,196 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
     const pGroups = new Set<string>();
     const pModels = new Set<string>();
     const itemCodes = new Set<string>();
-    const salesReps = new Set<string>(); 
+    const salesRepsMap = new Map<string, string>(); 
 
-    dbEntries.forEach((entry: any) => {
-        const lob = dbLobs.find((l: any) => l.lob_id === entry.lob_id);
-        const prod = dbProducts.find((p: any) => p.product_id === entry.product_id);
+    const activeLobIds = new Set();
+    const activeProductIds = new Set();
 
-        if (lob) {
+    for (const entry of dbEntries) {
+        const [y, m] = entry.planning_month.split('-');
+        if (dashFilters.year !== 'All' && y !== dashFilters.year) continue;
+        if (dashFilters.month !== 'All' && m !== dashFilters.month) continue;
+        activeLobIds.add(entry.lob_id);
+        activeProductIds.add(entry.product_id);
+    }
+
+    for (const actual of dbActualSales) {
+        const [y, m] = actual.invoice_date.split('-');
+        if (dashFilters.year !== 'All' && y !== dashFilters.year) continue;
+        if (dashFilters.month !== 'All' && m !== dashFilters.month) continue;
+        activeLobIds.add(actual.lob_id);
+        activeProductIds.add(actual.product_id);
+    }
+
+    dbLobs.forEach((lob: any) => {
+        if (activeLobIds.has(lob.lob_id)) {
             if (lob.lob_code) lobsMap.set(lob.lob_code, lob.lob_name || ''); 
             if (lob.sold_to_bp_name) bps.add(lob.sold_to_bp_name);
-            if (lob.sales_representative_no) salesReps.add(lob.sales_representative_no);
+            if (lob.sales_representative_no) {
+                salesRepsMap.set(lob.sales_representative_no, lob.sales_rep_name || lob.sales_representative_no);
+            }
         }
-        if (prod) {
-            if (prod.brand) brands.add(prod.brand); if (prod.product_line) pLines.add(prod.product_line);
-            if (prod.product_category) pCats.add(prod.product_category); if (prod.item_group) pGroups.add(prod.item_group);
-            if (prod.product_model) pModels.add(prod.product_model); if (prod.item_code) itemCodes.add(prod.item_code);
+    });
+
+    dbProducts.forEach((prod: any) => {
+        if (activeProductIds.has(prod.product_id)) {
+            if (prod.brand) brands.add(prod.brand); 
+            if (prod.product_line) pLines.add(prod.product_line);
+            if (prod.product_category) pCats.add(prod.product_category); 
+            if (prod.item_group) pGroups.add(prod.item_group);
+            if (prod.product_model) pModels.add(prod.product_model); 
+            if (prod.item_code) itemCodes.add(prod.item_code);
         }
     });
 
     return {
         lobs: Array.from(lobsMap.entries()).map(([code, name]) => ({ code, name })).sort((a,b) => a.code.localeCompare(b.code)),
-        bps: Array.from(bps).sort(), brands: Array.from(brands).sort(), pLines: Array.from(pLines).sort(),
-        pCats: Array.from(pCats).sort(), pGroups: Array.from(pGroups).sort(), pModels: Array.from(pModels).sort(), itemCodes: Array.from(itemCodes).sort(),
-        salesReps: Array.from(salesReps).sort()
+        bps: Array.from(bps).sort(), 
+        brands: Array.from(brands).sort(), 
+        pLines: Array.from(pLines).sort(),
+        pCats: Array.from(pCats).sort(), 
+        pGroups: Array.from(pGroups).sort(), 
+        pModels: Array.from(pModels).sort(), 
+        itemCodes: Array.from(itemCodes).sort(),
+        salesReps: Array.from(salesRepsMap.entries())
+            .map(([id, name]) => ({ id, name }))
+            .sort((a, b) => a.name.localeCompare(b.name))
     };
-  }, [dbEntries, dbLobs, dbProducts]);
+  }, [dbEntries, dbActualSales, dbLobs, dbProducts, dashFilters.year, dashFilters.month]);
 
+
+  // single pass data processing
   const fullDashboardData = useMemo(() => {
-    let filteredForDash = dbEntries.filter((entry: any) => {
-        const [y, m] = entry.planning_month.split('-');
-        if (dashFilters.year !== 'All' && y !== dashFilters.year) return false;
-        if (dashFilters.month !== 'All' && m !== dashFilters.month) return false;
-        
-        const lob = dbLobs.find((l: any) => l.lob_id === entry.lob_id);
-        if (dashFilters.lob !== 'All' && lob?.lob_code !== dashFilters.lob) return false;
-        if (dashFilters.businessPartner !== 'All' && lob?.sold_to_bp_name !== dashFilters.businessPartner) return false;
-        if (dashFilters.salesPerson !== 'All' && lob?.sales_representative_no !== dashFilters.salesPerson) return false;
-        
-        const product = dbProducts.find((p: any) => p.product_id === entry.product_id);
-        if (dashFilters.brand !== 'All' && product?.brand !== dashFilters.brand) return false;
-        if (dashFilters.productLine !== 'All' && product?.product_line !== dashFilters.productLine) return false;
-        if (dashFilters.productCategory !== 'All' && product?.product_category !== dashFilters.productCategory) return false;
-        if (dashFilters.productGroup !== 'All' && product?.item_group !== dashFilters.productGroup) return false;
-        if (dashFilters.productModel !== 'All' && product?.product_model !== dashFilters.productModel) return false;
-        if (dashFilters.itemCode !== 'All' && product?.item_code !== dashFilters.itemCode) return false;
-
-        return true;
-    });
-
-    //  actual sales filter
-    let filteredActuals = dbActualSales.filter((actual: any) => {
-        const [y, m] = actual.invoice_date.split('-');
-        if (dashFilters.year !== 'All' && y !== dashFilters.year) return false;
-        if (dashFilters.month !== 'All' && m !== dashFilters.month) return false;
-        
-        const lob = dbLobs.find((l: any) => l.lob_id === actual.lob_id);
-        if (dashFilters.lob !== 'All' && lob?.lob_code !== dashFilters.lob) return false;
-        if (dashFilters.businessPartner !== 'All' && lob?.sold_to_bp_name !== dashFilters.businessPartner) return false;
-        if (dashFilters.salesPerson !== 'All' && actual.sales_representative_no !== dashFilters.salesPerson) return false;
-
-        const product = dbProducts.find((p: any) => p.product_id === actual.product_id);
-        if (dashFilters.brand !== 'All' && product?.brand !== dashFilters.brand) return false;
-        if (dashFilters.productLine !== 'All' && product?.product_line !== dashFilters.productLine) return false;
-        if (dashFilters.productCategory !== 'All' && product?.product_category !== dashFilters.productCategory) return false;
-        if (dashFilters.productGroup !== 'All' && product?.item_group !== dashFilters.productGroup) return false;
-        if (dashFilters.productModel !== 'All' && product?.product_model !== dashFilters.productModel) return false;
-        if (dashFilters.itemCode !== 'All' && product?.item_code !== dashFilters.itemCode) return false;
-
-        return true;
-    });
-
     let forecastTotal = 0; let actualTotal = 0; let totalOnHand = 0;
     const tableGroups: Record<string, any> = {}; 
+    const uniqueProductIdsInView = new Set();
 
-    filteredForDash.forEach((entry: any) => {
-        const lob = dbLobs.find((l: any) => l.lob_id === entry.lob_id);
-        const bpName = lob?.sold_to_bp_name || 'Unknown';
-        const salesRep = lob?.sales_rep_name || lob?.sales_representative_no || '-'; 
-        const baseAmount = Number(entry.total_amount);
-        const currMult = EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES];
-        const convertedAmount = baseAmount * currMult;
-        forecastTotal += convertedAmount;
-        if (!tableGroups[bpName]) { tableGroups[bpName] = { bpName, lobName: lob?.lob_name || 'Unknown', salesRep, forecast: 0, actual: 0 }; }
-        tableGroups[bpName].forecast += convertedAmount;
-    });
+    // Chart Containers
+    const lobChartGroups: Record<string, { lobName: string, forecast: number, actual: number }> = {};
+    const repActuals: Record<string, number> = {};
+    
+    // Product Line and Product Model Containers
+    const productLineChartGroups: Record<string, { lineName: string, forecast: number }> = {};
+    const productModelGroups: Record<string, any> = {};
 
-    // group  Actuals by BP
-    filteredActuals.forEach((actual: any) => {
-        const lob = dbLobs.find((l: any) => l.lob_id === actual.lob_id);
-        const bpName = lob?.sold_to_bp_name || 'Unknown';
-        const salesRep = lob?.sales_rep_name || lob?.sales_representative_no || actual.sales_representative_no || '-';
+    const passesFilters = (y: string, m: string, lobId: number, productId: number, repNo: string) => {
+        if (dashFilters.year !== 'All' && y !== dashFilters.year) return false;
+        if (dashFilters.month !== 'All' && m !== dashFilters.month) return false;
+        if (dashFilters.salesPerson !== 'All' && repNo !== dashFilters.salesPerson) return false;
         
-        const baseAmount = Number(actual.sales); 
-        const currMult = EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES]; 
-        const convertedAmount = baseAmount * currMult;
+        const lob = lobsById.get(lobId);
+        if (dashFilters.lob !== 'All' && lob?.lob_code !== dashFilters.lob) return false;
+        if (dashFilters.businessPartner !== 'All' && lob?.sold_to_bp_name !== dashFilters.businessPartner) return false;
+        
+        const product = productsById.get(productId);
+        if (dashFilters.brand !== 'All' && product?.brand !== dashFilters.brand) return false;
+        if (dashFilters.productLine !== 'All' && product?.product_line !== dashFilters.productLine) return false;
+        if (dashFilters.productCategory !== 'All' && product?.product_category !== dashFilters.productCategory) return false;
+        if (dashFilters.productGroup !== 'All' && product?.item_group !== dashFilters.productGroup) return false;
+        if (dashFilters.productModel !== 'All' && product?.product_model !== dashFilters.productModel) return false;
+        if (dashFilters.itemCode !== 'All' && product?.item_code !== dashFilters.itemCode) return false;
+        return true; 
+    };
 
+    // initialize Product Model Group exactly ONCE to prevent duplicating inventory numbers
+    const initializeProductModelGroup = (pModel: string, product: any) => {
+        if (!productModelGroups[pModel]) {
+            productModelGroups[pModel] = {
+                productModel: pModel,
+                forecastQty: 0,
+                forecastAmount: 0,
+                // Static Master Data is captured once here
+                onHandKME: Number(product?.kme_qty || 0),
+                onHandKMI: Number(product?.kmi_qty || 0),
+                totalOnHand: Number(product?.total_qty || 0),
+                avg12m: Number(product?.avg_12m_sales || product?.avg_12m_qty || 0),
+                avg6m: Number(product?.avg_6m_sales || product?.avg_6m_qty || 0),
+                avg3m: Number(product?.avg_3m_sales || product?.avg_3m_qty || 0),
+            };
+        }
+    };
+
+    // process forecasts 
+    for (let i = 0; i < dbEntries.length; i++) {
+        const entry = dbEntries[i];
+        const [y, m] = entry.planning_month.split('-');
+        const lob = lobsById.get(entry.lob_id);
+        const repNo = lob?.sales_representative_no || 'Unknown'; 
+        
+        if (!passesFilters(y, m, entry.lob_id, entry.product_id, repNo)) continue;
+
+        uniqueProductIdsInView.add(entry.product_id);
+        
+        const bpName = lob?.sold_to_bp_name || 'Unknown';
+        const lobName = lob?.lob_name || lob?.lob_code || 'Unknown LOB';
+        const salesRepName = lob?.sales_rep_name || repNo; 
+        
+        const product = productsById.get(entry.product_id);
+        const pLine = product?.product_line || 'Unknown Line';
+        const pModel = product?.product_model || product?.item_code || 'Unknown Model';
+        
+        const convertedAmount = Number(entry.total_amount) * EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES];
+        forecastTotal += convertedAmount;
+
+        // top table data
+        if (!tableGroups[bpName]) tableGroups[bpName] = { bpName, lobName, salesRep: salesRepName, forecast: 0, actual: 0 };
+        tableGroups[bpName].forecast += convertedAmount;
+
+        // top bar chart data
+        if (!lobChartGroups[lobName]) lobChartGroups[lobName] = { lobName, forecast: 0, actual: 0 };
+        lobChartGroups[lobName].forecast += convertedAmount;
+
+        // product line chart data (forecast)
+        if (!productLineChartGroups[pLine]) productLineChartGroups[pLine] = { lineName: pLine, forecast: 0 };
+        productLineChartGroups[pLine].forecast += convertedAmount;
+
+        // Detailed Table Data
+        initializeProductModelGroup(pModel, product);
+
+        const forecastQty = Number(entry.quantities || entry.planned_quantity || entry.qty || 0);
+        productModelGroups[pModel].forecastQty += forecastQty;
+        productModelGroups[pModel].forecastAmount += convertedAmount;
+    }
+
+    //  process actuals 
+    for (let i = 0; i < dbActualSales.length; i++) {
+        const actual = dbActualSales[i];
+        const [y, m] = actual.invoice_date.split('-');
+        const lob = lobsById.get(actual.lob_id);
+        const repNo = actual.sales_representative_no || lob?.sales_representative_no || 'Unknown';
+
+        if (!passesFilters(y, m, actual.lob_id, actual.product_id, repNo)) continue;
+
+        uniqueProductIdsInView.add(actual.product_id);
+        
+        const bpName = lob?.sold_to_bp_name || 'Unknown';
+        const lobName = lob?.lob_name || lob?.lob_code || 'Unknown LOB';
+        const salesRepName = lob?.sales_rep_name || repNo;
+        
+        const product = productsById.get(actual.product_id);
+        const pLine = product?.product_line || 'Unknown Line';
+        const pModel = product?.product_model || product?.item_code || 'Unknown Model';
+        
+        const convertedAmount = Number(actual.sales) * EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES];
         actualTotal += convertedAmount;
 
-        if (!tableGroups[bpName]) { tableGroups[bpName] = { bpName, lobName: lob?.lob_name || 'Unknown', salesRep, forecast: 0, actual: 0 }; }
+        // Top Table Data
+        if (!tableGroups[bpName]) tableGroups[bpName] = { bpName, lobName, salesRep: salesRepName, forecast: 0, actual: 0 };
         tableGroups[bpName].actual += convertedAmount;
-    });
 
-    const uniqueProductIdsInView = new Set(filteredForDash.map((entry: any) => entry.product_id));
-    uniqueProductIdsInView.forEach(pid => {
-        const p = dbProducts.find((prod: any) => prod.product_id === pid);
+        // Top Bar Chart Data
+        if (!lobChartGroups[lobName]) lobChartGroups[lobName] = { lobName, forecast: 0, actual: 0 };
+        lobChartGroups[lobName].actual += convertedAmount;
+
+        repActuals[salesRepName] = (repActuals[salesRepName] || 0) + convertedAmount;
+
+        if (!productLineChartGroups[pLine]) productLineChartGroups[pLine] = { lineName: pLine, forecast: 0 };
+
+        initializeProductModelGroup(pModel, product);
+    }
+
+    uniqueProductIdsInView.forEach((pid: any) => {
+        const p = productsById.get(pid);
         if (p) totalOnHand += Number(p.total_qty || 0);
     });
 
@@ -134,17 +247,28 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
         forecastTotal, 
         actualTotal, 
         totalOnHand, 
-        tableData: Object.values(tableGroups).sort((a: any, b: any) => b.forecast - a.forecast) 
+        tableData: Object.values(tableGroups).sort((a: any, b: any) => b.forecast - a.forecast),
+        lobChartData: Object.values(lobChartGroups).sort((a: any, b: any) => a.lobName.localeCompare(b.lobName)),
+        repChartData: Object.entries(repActuals).map(([name, actual]) => ({ name, actual })).sort((a: any, b: any) => b.actual - a.actual),
+        productLineChartData: Object.values(productLineChartGroups).sort((a: any, b: any) => b.forecast - a.forecast),
+        productModelTableData: Object.values(productModelGroups).sort((a: any, b: any) => a.productModel.localeCompare(b.productModel))
     };
-  }, [dbEntries, dbActualSales, dbProducts, dbLobs, dashFilters, dashCurrency]);
+  }, [dbEntries, dbActualSales, lobsById, productsById, pricingByProductId, dashFilters, dashCurrency]); 
 
 
-  const maxChartValue = useMemo(() => {
-    return Math.max(fullDashboardData.forecastTotal, fullDashboardData.actualTotal);
-  }, [fullDashboardData.forecastTotal, fullDashboardData.actualTotal]);
+  // Scales for Charts
+  const maxLOBChartValue = useMemo(() => {
+    return Math.max(...fullDashboardData.lobChartData.map(d => Math.max(d.forecast, d.actual)), 100);
+  }, [fullDashboardData.lobChartData]);
+
+  const maxPLChartValue = useMemo(() => {
+    return Math.max(...fullDashboardData.productLineChartData.map(d => d.forecast), 100);
+  }, [fullDashboardData.productLineChartData]);
+
+  let currentDonutOffset = 0;
 
   return (
-    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300">
+    <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-12">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <div className="grid grid-cols-6 gap-4 items-end mb-4">
                 <div>
@@ -168,8 +292,8 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
                     </select>
                 </div>
                 
-                <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Sales Rep ID</label>
+               <div>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Sales Rep Name</label>
                     <select 
                         disabled={user.role_id !== 2} 
                         value={dashFilters.salesPerson} 
@@ -178,7 +302,9 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
                     >
                         {user.role_id === 2 && <option value="All">All Reps</option>}
                         {user.role_id !== 2 && <option value={user.employee_id}>{user.full_name}</option>}
-                        {user.role_id === 2 && dashboardFilterOptions.salesReps.map((rep: any) => <option key={rep} value={rep}>{rep}</option>)}
+                        {user.role_id === 2 && dashboardFilterOptions.salesReps.map((rep: any) => (
+                            <option key={rep.id} value={rep.id}>{rep.name}</option>
+                        ))}
                     </select>
                 </div>
 
@@ -200,6 +326,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
             </div>
         </div>
 
+        {/* SECTION 1: TOP DASHBOARD (Company Totals & LOB) */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
             <div className="flex flex-col md:flex-row gap-8 items-start md:items-center border-b border-slate-100 pb-6 mb-6">
                 <div>
@@ -219,37 +346,65 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
                 </div>
             </div>
 
-            <div className="grid grid-cols-4 gap-12 pt-4 pb-8">
-                {/* donut chart  */}
-                <div className="col-span-1 flex flex-col items-center justify-center border-r border-slate-100 pr-6">
-                    <div className="relative w-48 h-48 rounded-full flex items-center justify-center shadow-inner" style={{ background: `conic-gradient(#3b82f6 0% ${fullDashboardData.forecastTotal > 0 ? Math.min((fullDashboardData.actualTotal / fullDashboardData.forecastTotal) * 100, 100) : 0}%, #e2e8f0 0% 100%)` }}>
-                        <div className="absolute w-36 h-36 bg-white rounded-full flex items-center justify-center shadow-md">
-                            <span className="text-2xl font-light text-slate-800">
-                                {fullDashboardData.forecastTotal > 0 ? ((fullDashboardData.actualTotal / fullDashboardData.forecastTotal) * 100).toFixed(0) : 0}%
-                            </span>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-12 pt-4 pb-8">
+                {/* Left Side: SVG Donut Chart (Actuals by Sales Rep) */}
+                <div className="col-span-1 flex items-center justify-center relative border-r border-slate-100 pr-6">
+                    <div className="w-56 h-56 relative shrink-0">
+                        <svg viewBox="0 0 42 42" className="w-full h-full -rotate-90 filter drop-shadow-sm">
+                            <circle cx="21" cy="21" r="15.91549431" fill="transparent" stroke="#f1f5f9" strokeWidth="6" />
+                            {fullDashboardData.repChartData.map((rep, idx) => {
+                                const rawPercent = (rep.actual / fullDashboardData.actualTotal) * 100;
+                                if (rawPercent === 0 || isNaN(rawPercent)) return null;
+                                
+                                const percentDraw = Math.max(rawPercent - 0.5, 0); 
+                                const dashArray = `${percentDraw} ${100 - percentDraw}`;
+                                const dashOffset = -currentDonutOffset;
+                                currentDonutOffset += rawPercent;
+
+                                return (
+                                    <circle key={rep.name} cx="21" cy="21" r="15.91549431" fill="transparent" stroke={CHART_COLORS[idx % CHART_COLORS.length]} strokeWidth="6" strokeDasharray={dashArray} strokeDashoffset={dashOffset} className="transition-all duration-300 hover:stroke-[7px] cursor-pointer">
+                                        <title>{rep.name} - {dashCurrency} {rep.actual.toLocaleString()} ({rawPercent.toFixed(2)}%)</title>
+                                    </circle>
+                                );
+                            })}
+                        </svg>
+                        <div className="absolute inset-0 m-auto w-32 h-32 bg-white rounded-full flex flex-col items-center justify-center shadow-inner">
+                            <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Total Actual</span>
+                            <span className="text-xl font-light text-slate-800">{Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(fullDashboardData.actualTotal)}</span>
                         </div>
                     </div>
-                    <div className="mt-6 flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-blue-500"></div>
-                        <span className="text-xs font-bold text-slate-600">Company Achievement</span>
+
+                    <div className="flex flex-col gap-2 ml-6 text-[10px] font-bold text-slate-600">
+                        {fullDashboardData.repChartData.map((rep, idx) => {
+                            if (rep.actual === 0) return null;
+                            const pct = ((rep.actual / fullDashboardData.actualTotal) * 100).toFixed(2);
+                            return (
+                                <div key={rep.name} className="flex items-center gap-2 whitespace-nowrap">
+                                    <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: CHART_COLORS[idx % CHART_COLORS.length] }}></div>
+                                    <span className="w-8 text-slate-400 font-mono text-right">{pct}%</span>
+                                    <span className="truncate max-w-[100px]" title={rep.name}>{rep.name}</span>
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
-
                 
-                <div className="col-span-3 flex flex-col justify-end relative h-64 pb-8 pl-12">
-                    <div className="absolute top-0 right-0 flex gap-4 text-[10px] font-bold text-slate-500 uppercase z-20">
-                        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-indigo-500"></div> Forecast</div>
-                        <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-sm bg-purple-500"></div> Actual</div>
+                {/* Right Side: Grouped Bar Chart (LOB) */}
+                <div className="col-span-2 flex flex-col relative h-72 pb-8 pl-12 pr-4">
+                    <div className="absolute top-0 w-full left-0 flex justify-between items-center z-20 px-4">
+                        <p className="text-sm font-bold text-slate-700">Revenue Performance by LOB</p>
+                        <div className="flex gap-4 text-[10px] font-bold text-slate-500 uppercase">
+                            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-blue-500 shadow-sm"></div> Forecast</div>
+                            <div className="flex items-center gap-1.5"><div className="w-3 h-3 rounded-full bg-purple-600 shadow-sm"></div> Actual Sales</div>
+                        </div>
                     </div>
-                    <p className="absolute top-0 left-0 text-xs font-bold text-slate-500 uppercase tracking-widest z-20">Revenue Performance ({dashCurrency})</p>
                     
-                    {/* background grid  */}
-                    <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8 pl-12 mt-8">
-                        {[100, 75, 50, 25, 0].map(pct => {
-                            const val = (maxChartValue * pct) / 100;
+                    <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8 pl-12 mt-10">
+                        {[100, 66.66, 33.33, 0].map(pct => {
+                            const val = (maxLOBChartValue * pct) / 100;
                             return (
                                 <div key={pct} className="flex items-center w-full h-0 border-t border-slate-100 border-dashed">
-                                    <span className="absolute left-0 text-[9px] font-medium text-slate-400 -translate-y-1/2 w-10 text-right pr-2">
+                                    <span className="absolute left-0 text-[10px] font-medium text-slate-400 -translate-y-1/2 w-10 text-right pr-2">
                                         {val > 0 ? Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val) : '0'}
                                     </span>
                                 </div>
@@ -257,41 +412,26 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
                         })}
                     </div>
 
-                 
-                    <div className="flex justify-center items-end h-full gap-16 z-10 relative w-full pt-8">
-                        {fullDashboardData.forecastTotal > 0 || fullDashboardData.actualTotal > 0 ? (
-                            <>
-                       
-                                <div className="flex flex-col items-center justify-end h-full relative group w-24">
-                                    <div className="w-full bg-indigo-500 rounded-t shadow-sm hover:bg-indigo-400 transition-all relative" style={{ height: `${maxChartValue > 0 ? (fullDashboardData.forecastTotal / maxChartValue) * 100 : 0}%` }}>
-                                        <div className="opacity-0 group-hover:opacity-100 absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap z-50 transition-opacity font-mono">
-                                            F: {fullDashboardData.forecastTotal.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}
-                                        </div>
-                                    </div>
-                                    <div className="absolute -bottom-6 text-center text-[10px] font-bold text-slate-600 truncate">Forecast</div>
+                    <div className="flex items-end h-full gap-8 z-10 relative w-full pt-10 border-b border-slate-200">
+                        {fullDashboardData.lobChartData.length > 0 ? fullDashboardData.lobChartData.map((lobData) => (
+                            <div key={lobData.lobName} className="flex-1 flex flex-col items-center justify-end h-full relative group">
+                                <div className="flex items-end h-full gap-1.5 w-full justify-center">
+                                    <div className="w-12 bg-blue-500 shadow-sm hover:opacity-80 transition-opacity" style={{ height: `${(lobData.forecast / maxLOBChartValue) * 100}%` }} title={`Forecast: ${dashCurrency} ${lobData.forecast.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}`} />
+                                    <div className="w-12 bg-purple-600 shadow-sm hover:opacity-80 transition-opacity" style={{ height: `${(lobData.actual / maxLOBChartValue) * 100}%` }} title={`Actual: ${dashCurrency} ${lobData.actual.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}`} />
                                 </div>
-
-                               
-                                <div className="flex flex-col items-center justify-end h-full relative group w-24">
-                                    <div className="w-full bg-purple-500 rounded-t shadow-sm hover:bg-purple-400 transition-all relative" style={{ height: `${maxChartValue > 0 ? (fullDashboardData.actualTotal / maxChartValue) * 100 : 0}%` }}>
-                                        <div className="opacity-0 group-hover:opacity-100 absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-1 rounded shadow-lg pointer-events-none whitespace-nowrap z-50 transition-opacity font-mono">
-                                            A: {fullDashboardData.actualTotal.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}
-                                        </div>
-                                    </div>
-                                    <div className="absolute -bottom-6 text-center text-[10px] font-bold text-slate-600 truncate">Actual</div>
-                                </div>
-                            </>
-                        ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                                <p className="text-slate-400 italic text-sm">No data available for the selected filters.</p>
+                                <div className="absolute -bottom-6 text-center text-[11px] font-bold text-slate-600 truncate max-w-full">{lobData.lobName}</div>
                             </div>
+                        )) : (
+                            <div className="w-full h-full flex items-center justify-center"><p className="text-slate-400 italic text-sm">No data available for the selected filters.</p></div>
                         )}
                     </div>
+                    <div className="absolute -bottom-2 w-full text-center text-[11px] font-black text-slate-800 uppercase tracking-widest pl-12">LOB</div>
                 </div>
             </div>
 
-            <div className="mt-8 border border-slate-200 rounded-lg overflow-hidden">
-                <table className="w-full text-xs text-right">
+            {/* Top Table */}
+            <div className="mt-8 border border-slate-200 rounded-lg overflow-x-auto">
+                <table className="w-full text-xs text-right whitespace-nowrap">
                     <thead className="bg-slate-100/80 text-slate-800 font-bold border-b border-slate-200">
                         <tr>
                             <th className="px-4 py-3 text-left">Sales Rep Name</th>
@@ -311,7 +451,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
                                 <tr key={row.bpName} className="hover:bg-slate-50">
                                     <td className="px-4 py-2.5 font-bold text-slate-500 text-left">{row.salesRep}</td>
                                     <td className="px-4 py-2.5 font-bold text-slate-700 text-left">{row.lobName}</td>
-                                    <td className="px-4 py-2.5 text-slate-600 text-left truncate max-w-[250px]">{row.bpName}</td>
+                                    <td className="px-4 py-2.5 text-slate-600 text-left truncate max-w-[250px]" title={row.bpName}>{row.bpName}</td>
                                     <td className="px-4 py-2.5 font-mono">{row.forecast.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                                     <td className="px-4 py-2.5 font-mono">{row.actual.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                                     <td className={`px-4 py-2.5 font-mono ${isPos ? 'text-slate-700' : 'text-rose-500'}`}>{row.actual - row.forecast > 0 ? '+' : ''}{(row.actual - row.forecast).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
@@ -330,6 +470,88 @@ export default function FullDashboard({ dbLobs, dbProducts, dbEntries, dbActualS
                         )}
                         {fullDashboardData.tableData.length === 0 && (
                             <tr><td colSpan={7} className="px-4 py-8 text-center text-slate-400 italic">No forecast or actual data matches the selected filters.</td></tr>
+                        )}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+
+
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-6 mt-6">
+        
+            <div className="flex flex-col relative h-72 pb-8 pl-12 pr-4 mb-6">
+                <div className="absolute top-0 w-full left-0 flex justify-between items-center z-20 px-4">
+                    <p className="text-sm font-bold text-slate-700">Forecast by Product Line</p>
+                </div>
+                
+                {/* Background Grid Lines */}
+                <div className="absolute inset-0 flex flex-col justify-between pointer-events-none pb-8 pl-12 mt-10">
+                    {[100, 75, 50, 25, 0].map(pct => {
+                        const val = (maxPLChartValue * pct) / 100;
+                        return (
+                            <div key={pct} className="flex items-center w-full h-0 border-t border-slate-100 border-dashed">
+                                <span className="absolute left-0 text-[10px] font-medium text-slate-400 -translate-y-1/2 w-10 text-right pr-2">
+                                    {val > 0 ? Intl.NumberFormat('en-US', { notation: "compact", maximumFractionDigits: 1 }).format(val) : '0'}
+                                </span>
+                            </div>
+                        );
+                    })}
+                </div>
+
+                {/* The Salmon/Orange Bars */}
+                <div className="flex items-end h-full gap-8 z-10 relative w-full pt-10 border-b border-slate-200">
+                    {fullDashboardData.productLineChartData.length > 0 ? fullDashboardData.productLineChartData.map((plData) => (
+                        <div key={plData.lineName} className="flex-1 flex flex-col items-center justify-end h-full relative group">
+
+                            <div 
+                                className="w-32 bg-[#fdb797] border border-[#e69b7a] shadow-sm hover:opacity-80 transition-opacity" 
+                                style={{ height: `${maxPLChartValue > 0 ? (plData.forecast / maxPLChartValue) * 100 : 0}%` }}
+                                title={`Forecast: ${dashCurrency} ${plData.forecast.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`}
+                            />
+                            <div className="absolute -bottom-6 text-center text-[10px] font-bold text-slate-500 uppercase tracking-wider truncate max-w-full">{plData.lineName}</div>
+                        </div>
+                    )) : (
+                        <div className="w-full h-full flex items-center justify-center"><p className="text-slate-400 italic text-sm">No forecast data available.</p></div>
+                    )}
+                </div>
+                <div className="absolute -bottom-2 w-full text-center text-[11px] font-black text-slate-800 uppercase tracking-widest pl-12">Product Line</div>
+            </div>
+
+
+            <div className="mt-12 border border-slate-200 rounded-lg overflow-x-auto">
+                <table className="w-full text-xs text-right whitespace-nowrap">
+                    <thead className="bg-slate-100/80 text-slate-800 font-bold border-b border-slate-200">
+                        <tr>
+                            <th className="px-4 py-3 text-left">Product Model</th>
+                            <th className="px-4 py-3">Forecast Quantity</th>
+                            <th className="px-4 py-3">Forecast Amount</th>
+                            <th className="px-4 py-3">On Hand KME</th>
+                            <th className="px-4 py-3">On Hand KMI</th>
+                            <th className="px-4 py-3">Total On Hand</th>
+                            <th className="px-4 py-3">Avg Sales Last 12M</th>
+                            <th className="px-4 py-3">Avg Sales Last 6M</th>
+                            <th className="px-4 py-3">Avg Sales Last 3M</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {fullDashboardData.productModelTableData.map(row => {
+                            return (
+                                <tr key={row.productModel} className="hover:bg-slate-50">
+                                    <td className="px-4 py-2.5 font-bold text-slate-600 text-left">{row.productModel}</td>
+                                    <td className="px-4 py-2.5 font-mono">{row.forecastQty.toLocaleString()}</td>
+                                    <td className="px-4 py-2.5 font-mono">{row.forecastAmount.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
+                                    <td className="px-4 py-2.5 font-mono">{row.onHandKME.toLocaleString()}</td>
+                                    <td className="px-4 py-2.5 font-mono">{row.onHandKMI.toLocaleString()}</td>
+                                    <td className="px-4 py-2.5 font-mono font-bold text-slate-700">{row.totalOnHand.toLocaleString()}</td>
+                                    <td className="px-4 py-2.5 font-mono">{row.avg12m.toLocaleString()}</td>
+                                    <td className="px-4 py-2.5 font-mono">{row.avg6m.toLocaleString()}</td>
+                                    <td className="px-4 py-2.5 font-mono">{row.avg3m.toLocaleString()}</td>
+                                </tr>
+                            );
+                        })}
+                        {fullDashboardData.productModelTableData.length === 0 && (
+                            <tr><td colSpan={9} className="px-4 py-8 text-center text-slate-400 italic">No data matches the selected filters.</td></tr>
                         )}
                     </tbody>
                 </table>

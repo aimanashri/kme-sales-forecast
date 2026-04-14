@@ -93,12 +93,21 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
         </header>
 
         <div className="flex-1 overflow-auto p-6" style={{ zoom: 0.80 }}>
-          {activeTab === 'data-entry' && <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} />}
-          {activeTab === 'summary-item' && <SummaryByItem dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />}
-          {activeTab === 'summary-bp' && <SummaryByBP dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />}
-          
-          {activeTab === 'dashboard-full' && <FullDashboard dbLobs={dbLobs} dbProducts={dbProducts} dbEntries={dbEntries} dbActualSales={dbActualSales} user={user} />}
-          {activeTab === 'actual-sales' && <ActualSales dbProducts={dbProducts} dbEntries={dbEntries} dbBudgets={dbBudgets} selectedYear={selectedYear} user={user} />}
+          <div className={activeTab === 'data-entry' ? 'block h-full' : 'hidden'}>
+            <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} />
+          </div>
+          <div className={activeTab === 'summary-item' ? 'block h-full' : 'hidden'}>
+            <SummaryByItem dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
+          </div>
+          <div className={activeTab === 'summary-bp' ? 'block h-full' : 'hidden'}>
+            <SummaryByBP dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
+          </div>
+          <div className={activeTab === 'dashboard-full' ? 'block h-full' : 'hidden'}>
+            <FullDashboard dbLobs={dbLobs} dbProducts={dbProducts} dbEntries={dbEntries} dbActualSales={dbActualSales} dbPricing={dbPricing} user={user} />
+          </div>
+          <div className={activeTab === 'actual-sales' ? 'block h-full' : 'hidden'}>
+            <ActualSales dbProducts={dbProducts} dbEntries={dbEntries} dbBudgets={dbBudgets} selectedYear={selectedYear} user={user} />
+          </div>
         </div>
       </main>
     </div>

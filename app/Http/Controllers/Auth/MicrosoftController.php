@@ -37,7 +37,7 @@ class MicrosoftController extends Controller
         $user = User::updateOrCreate(
             ['email' => $msUser->getEmail()],
             [
-                'name'              => $msUser->getName(),
+                'full_name'              => $msUser->getName(),
                 'microsoft_id'      => $msUser->getId(),
                 'employee_id'       => $profile['employeeId'] ?? null,
                 'department'        => $profile['department'] ?? null,

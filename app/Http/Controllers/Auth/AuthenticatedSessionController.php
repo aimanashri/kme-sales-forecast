@@ -33,7 +33,7 @@ class AuthenticatedSessionController extends Controller
 
         $request->session()->regenerate();
 
-        return redirect()->intended(route('forecast', absolute: false));
+        return redirect()->route('forecast');
     }
 
     /**

@@ -50,17 +50,16 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
       
       <aside className={`bg-slate-900 text-white flex flex-col shadow-xl transition-all duration-300 ease-in-out shrink-0 z-20 ${isSidebarOpen ? 'w-64' : 'w-20'}`} style={{ zoom: 0.80 }}>
         <div className={`p-6 border-b border-slate-800 flex items-center h-20 transition-all ${isSidebarOpen ? 'gap-3 justify-start' : 'px-0 justify-center'}`}>
-            <Link href={route('forecast')}>
+          
              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold shadow-lg shrink-0 hover:bg-blue-500 transition-colors">K</div>
-            </Link>
+
             {isSidebarOpen && (
                 <div className="whitespace-nowrap overflow-hidden">
-                    <h1 className="font-bold text-lg tracking-tight">KME Planner</h1>
+                    <h1 className="font-bold text-lg tracking-tight">KME RSP</h1>
                     <p className="text-xs text-slate-400">Forecast system</p>
                 </div>
             )}
         </div>
-        
         <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
           {isSidebarOpen ? <div className="px-4 pb-2 pt-2 text-[10px] font-black text-slate-300 uppercase tracking-widest opacity-80 whitespace-nowrap">Data Management</div> : <div className="w-8 mx-auto border-t border-slate-700 my-4"></div>}
           

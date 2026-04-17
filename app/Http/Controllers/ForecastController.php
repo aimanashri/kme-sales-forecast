@@ -20,60 +20,55 @@ class ForecastController extends Controller
         $user = Auth::user();
         $isAdmin = $user->role_id == 2;
 
+        $currentLobIds = Lob::where('sales_representative_no', $user->employee_id)
+            ->pluck('lob_id')
+            ->toArray();
+
+        $historicalLobIds = ActualSale::where('sales_representative_no', $user->employee_id)
+            ->pluck('lob_id')
+            ->toArray();
+
+        $validLobIds = array_unique(array_merge($currentLobIds, $historicalLobIds));
+
         $allowedLobs = Lob::query()
             ->select(
-                'lobs.lob_id',
-                'lobs.sold_to_bp',
-                'lobs.sold_to_bp_name',
-                'lobs.lob_code',
-                'lobs.lob_name',
-                'lobs.sales_representative_no',
-                'users.full_name as sales_rep_name' 
+                'lobs.lob_id', 'lobs.sold_to_bp', 'lobs.sold_to_bp_name',
+                'lobs.lob_code', 'lobs.lob_name', 'lobs.sales_representative_no',
+                'users.full_name as sales_rep_name'
             )
             ->leftJoin('users', 'lobs.sales_representative_no', '=', 'users.employee_id')
-            ->when(!$isAdmin, function ($query) use ($user) {
-                // If not admin, only get LOBs assigned to this specific Sales Rep
-                $query->where('lobs.sales_representative_no', $user->employee_id);
+            ->when(!$isAdmin, function ($query) use ($validLobIds) {
+                $query->whereIn('lobs.lob_id', $validLobIds);
             })
             ->get();
 
         $allowedLobIds = $allowedLobs->pluck('lob_id');
 
         return Inertia::render('Forecast/Forecast', [
-            'dbLobs' => fn() => $allowedLobs,
+            // pass immediately (lightweight)
+            'dbLobs' => $allowedLobs, 
 
-            'dbProducts' => fn() => Product::select(
-                'product_id',
-                'item_code',
-                'product_model',
-                'item_description',
-                'product_category',
-                'product_line',
-                'item_group',
-                'brand',
-                'cogs_price',
-                'cogs_currency',
-                'kmi_qty',
-                'kme_qty',
-                'total_qty',
-                'avg_12m_sales',
-                'avg_6m_sales',
-                'avg_3m_sales'
-            )->get(),
+            // pass lazily for haevy data
+            'dbProducts' => Inertia::lazy(fn() => Product::select(
+                'product_id', 'item_code', 'product_model', 'item_description',
+                'product_category', 'product_line', 'item_group', 'brand',
+                'cogs_price', 'cogs_currency', 'kmi_qty', 'kme_qty', 'total_qty',
+                'avg_12m_sales', 'avg_6m_sales', 'avg_3m_sales'
+            )->get()),
 
-            'dbPricing' => fn() => ProductPrice::select('product_id', 'lob_id', 'price')->get(),
+            'dbPricing' => Inertia::lazy(fn() => ProductPrice::select('product_id', 'lob_id', 'price')->get()),
 
-            'dbEntries' => UserPlanning::when(!$isAdmin, function ($query) use ($allowedLobIds) {
-                    $query->whereIn('lob_id', $allowedLobIds);
-                })
-                ->orderBy('created_at', 'desc')
-                ->get(),
+            'dbEntries' => Inertia::lazy(fn() => UserPlanning::when(!$isAdmin, function ($query) use ($allowedLobIds) {
+                $query->whereIn('lob_id', $allowedLobIds);
+            })->orderBy('created_at', 'desc')->get()),
 
-            'dbBudgets' => CategoryBudget::when(!$isAdmin, function($query) use($user) {
+            'dbBudgets' => Inertia::lazy(fn() => CategoryBudget::when(!$isAdmin, function ($query) use ($user) {
                 $query->where('user_id', $user->user_id);
-            })->get(),
+            })->get()),
 
-            'dbActualSales' => ActualSale::all(),
+            'dbActualSales' => Inertia::lazy(fn() => ActualSale::when(!$isAdmin, function ($query) use ($user) {
+                $query->where('sales_representative_no', $user->employee_id);
+            })->get()),
         ]);
     }
 
@@ -94,26 +89,31 @@ class ForecastController extends Controller
             'entries.*.confirmed_quantity' => 'required|integer|min:0',
         ]);
 
-        $userId = Auth::user()->user_id;
+        $currentUserId = Auth::user()->user_id;
 
-        DB::transaction(function () use ($validated, $userId) {
+        DB::transaction(function () use ($validated, $currentUserId) {
             foreach ($validated['entries'] as $entry) {
-                UserPlanning::updateOrCreate(
-                    [
-                        'user_id' => $userId,
-                        'lob_id' => $entry['lob_id'],
-                        'product_id' => $entry['product_id'],
-                        'planning_month' => $entry['planning_month'],
-                    ],
-                    [
-                        'planned_quantity' => $entry['planned_quantity'],
-                        'planned_price_aed' => $entry['planned_price_aed'],
-                        'planned_price_myr' => $entry['planned_price_myr'],
-                        'planned_price_usd' => $entry['planned_price_usd'],
-                        'total_amount' => $entry['total_amount'],
-                        'confirmed_quantity' => $entry['confirmed_quantity'] ?? 0,
-                    ]
-                );
+                
+                $planning = UserPlanning::firstOrNew([
+                    'lob_id' => $entry['lob_id'],
+                    'product_id' => $entry['product_id'],
+                    'planning_month' => $entry['planning_month'],
+                ]);
+
+                if (!$planning->exists) {
+                    $planning->user_id = $currentUserId;
+                }
+
+                $planning->updated_by = $currentUserId;
+
+                $planning->fill([
+                    'planned_quantity' => $entry['planned_quantity'],
+                    'planned_price_aed' => $entry['planned_price_aed'],
+                    'planned_price_myr' => $entry['planned_price_myr'],
+                    'planned_price_usd' => $entry['planned_price_usd'],
+                    'total_amount' => $entry['total_amount'],
+                    'confirmed_quantity' => $entry['confirmed_quantity'] ?? 0,
+                ])->save();
             }
         });
 

@@ -1,31 +1,48 @@
-import React, { useState } from 'react';
-import { Head, Link, usePage } from '@inertiajs/react';
-import { Database, LogOut, Calculator, Search, Menu, FileEdit, PieChart, Calendar, TrendingUp, Building2 } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Head, Link, usePage, router } from '@inertiajs/react';
+import { Database, LogOut, Search, Menu, FileEdit, PieChart, Building2, Loader2 } from 'lucide-react';
 import SalesDataEntry from './Components/SalesDataEntry';
 import SummaryByItem from './Components/SummaryByItem';
 import SummaryByBP from './Components/SummaryByBP'; 
 import FullDashboard from './Components/FullDashboard';
 import ActualSales from './Components/ActualSales';
 
-export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = [], dbBudgets = [], dbActualSales = [] }: any) {
+const NavButton = ({ id, label, icon: Icon, activeTab, isSidebarOpen, onClick }: any) => (
+  <button 
+    onClick={() => onClick(id)} 
+    title={!isSidebarOpen ? label : ""} 
+    className={`w-full flex items-center ${isSidebarOpen ? 'px-4 justify-start gap-3' : 'px-0 justify-center'} py-2.5 rounded-lg transition-all duration-200 ${activeTab === id ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
+  >
+      <Icon size={20} className="shrink-0" />
+      {isSidebarOpen && <span className="font-medium text-sm whitespace-nowrap">{label}</span>}
+  </button>
+);
+
+
+export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbBudgets, dbActualSales }: any) {
   const user = usePage().props.auth.user as any; 
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [activeTab, setActiveTab] = useState('data-entry'); 
-  
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
-  const NavButton = ({ id, label, icon: Icon }: any) => (
-    <button 
-      onClick={() => { setActiveTab(id); setSearchTerm(''); }} 
-      title={!isSidebarOpen ? label : ""} 
-      className={`w-full flex items-center ${isSidebarOpen ? 'px-4 justify-start gap-3' : 'px-0 justify-center'} py-2.5 rounded-lg transition-all duration-200 ${activeTab === id ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800 hover:text-white'}`}
-    >
-        <Icon size={20} className="shrink-0" />
-        {isSidebarOpen && <span className="font-medium text-sm whitespace-nowrap">{label}</span>}
-    </button>
-  );
+  // check if the data already received from server 
+  const isDataLoaded = dbProducts !== undefined && dbPricing !== undefined && dbEntries !== undefined;
+
+  // background request for heavy data 
+  useEffect(() => {
+      if (!isDataLoaded) {
+          router.reload({
+              only: ['dbProducts', 'dbPricing', 'dbEntries', 'dbBudgets', 'dbActualSales'],
+          });
+      }
+  }, [isDataLoaded]);
+
+  const handleTabChange = (id: string) => {
+      setActiveTab(id);
+      setSearchTerm('');
+  };
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans text-slate-800 overflow-hidden animate-in fade-in duration-300">
@@ -33,7 +50,7 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
       
       <aside className={`bg-slate-900 text-white flex flex-col shadow-xl transition-all duration-300 ease-in-out shrink-0 z-20 ${isSidebarOpen ? 'w-64' : 'w-20'}`} style={{ zoom: 0.80 }}>
         <div className={`p-6 border-b border-slate-800 flex items-center h-20 transition-all ${isSidebarOpen ? 'gap-3 justify-start' : 'px-0 justify-center'}`}>
-            <Link href={route('dashboard')}>
+            <Link href={route('forecast')}>
              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold shadow-lg shrink-0 hover:bg-blue-500 transition-colors">K</div>
             </Link>
             {isSidebarOpen && (
@@ -46,12 +63,14 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
         
         <nav className="flex-1 py-6 px-3 space-y-1 overflow-y-auto no-scrollbar">
           {isSidebarOpen ? <div className="px-4 pb-2 pt-2 text-[10px] font-black text-slate-300 uppercase tracking-widest opacity-80 whitespace-nowrap">Data Management</div> : <div className="w-8 mx-auto border-t border-slate-700 my-4"></div>}
-          <NavButton id="data-entry" label="Sales Forecast" icon={FileEdit} />
-          <NavButton id="summary-item" label="Summary by Item" icon={Database} />
-          <NavButton id="summary-bp" label="Summary by BP" icon={Building2} />
+          
+          <NavButton id="data-entry" label="Sales Forecast" icon={FileEdit} activeTab={activeTab} isSidebarOpen={isSidebarOpen} onClick={handleTabChange} />
+          <NavButton id="summary-item" label="Summary by Item" icon={Database} activeTab={activeTab} isSidebarOpen={isSidebarOpen} onClick={handleTabChange} />
+          <NavButton id="summary-bp" label="Summary by BP" icon={Building2} activeTab={activeTab} isSidebarOpen={isSidebarOpen} onClick={handleTabChange} />
           
           {isSidebarOpen ? <div className="px-4 pb-2 pt-6 text-[10px] font-black text-slate-300 uppercase tracking-widest opacity-80 whitespace-nowrap">Analytics & Reports</div> : <div className="w-8 mx-auto border-t border-slate-700 my-4"></div>}
-          <NavButton id="dashboard-full" label="Full Dashboard" icon={PieChart} />
+          
+          <NavButton id="dashboard" label="Full Dashboard" icon={PieChart} activeTab={activeTab} isSidebarOpen={isSidebarOpen} onClick={handleTabChange} />
         </nav>
 
         <div className={`p-4 border-t border-slate-800 flex items-center ${isSidebarOpen ? 'gap-3' : 'flex-col gap-3 justify-center'}`}>
@@ -93,21 +112,32 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries = []
         </header>
 
         <div className="flex-1 overflow-auto p-6" style={{ zoom: 0.80 }}>
-          <div className={activeTab === 'data-entry' ? 'block h-full' : 'hidden'}>
-            <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} />
-          </div>
-          <div className={activeTab === 'summary-item' ? 'block h-full' : 'hidden'}>
-            <SummaryByItem dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
-          </div>
-          <div className={activeTab === 'summary-bp' ? 'block h-full' : 'hidden'}>
-            <SummaryByBP dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
-          </div>
-          <div className={activeTab === 'dashboard-full' ? 'block h-full' : 'hidden'}>
-            <FullDashboard dbLobs={dbLobs} dbProducts={dbProducts} dbEntries={dbEntries} dbActualSales={dbActualSales} dbPricing={dbPricing} user={user} />
-          </div>
-          <div className={activeTab === 'actual-sales' ? 'block h-full' : 'hidden'}>
-            <ActualSales dbProducts={dbProducts} dbEntries={dbEntries} dbBudgets={dbBudgets} selectedYear={selectedYear} user={user} />
-          </div>
+          {/* show the loading state */}
+          {!isDataLoaded ? (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
+                  <Loader2 size={40} className="animate-spin text-blue-500" />
+                  <p className="font-medium text-lg">Loading forecast database...</p>
+                  <p className="text-xs">Preparing products, pricing, and entries</p>
+              </div>
+          ) : (
+              <>
+                  <div className={activeTab === 'data-entry' ? 'block h-full' : 'hidden'}>
+                    <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} />
+                  </div>
+                  <div className={activeTab === 'summary-item' ? 'block h-full' : 'hidden'}>
+                    <SummaryByItem dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
+                  </div>
+                  <div className={activeTab === 'summary-bp' ? 'block h-full' : 'hidden'}>
+                    <SummaryByBP dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
+                  </div>
+                  <div className={activeTab === 'dashboard' ? 'block h-full' : 'hidden'}>
+                    <FullDashboard dbLobs={dbLobs} dbProducts={dbProducts} dbEntries={dbEntries} dbActualSales={dbActualSales || []} dbPricing={dbPricing} user={user} />
+                  </div>
+                  <div className={activeTab === 'actual-sales' ? 'block h-full' : 'hidden'}>
+                    <ActualSales dbProducts={dbProducts} dbEntries={dbEntries} dbBudgets={dbBudgets || []} selectedYear={selectedYear} user={user} />
+                  </div>
+              </>
+          )}
         </div>
       </main>
     </div>

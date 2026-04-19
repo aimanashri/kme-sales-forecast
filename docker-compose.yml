@@ -14,6 +14,22 @@ services:
     networks:
       - kme_network
 
+  scheduler:                     
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
+    container_name: kme_scheduler
+    restart: unless-stopped
+    working_dir: /var/www
+    command: sh -c "while true; do php artisan schedule:run --verbose; sleep 60; done"
+    volumes:
+      - .:/var/www
+      - ./storage:/var/www/storage
+    depends_on:
+      - app
+    networks:
+      - kme_network
+
   web:
     image: nginx:stable-alpine
     container_name: kme_nginx

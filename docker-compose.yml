@@ -2,7 +2,9 @@ version: '3.8'
 
 services:
   app:
-    image: kme-sales-forecast-app:working
+    build:
+      context: .
+      dockerfile: docker/php/Dockerfile
     container_name: kme_app
     restart: unless-stopped
     working_dir: /var/www

@@ -47,3 +47,4 @@ services:
 networks:
   kme_network:
     driver: bridge
+    name: kme_network

@@ -14,7 +14,7 @@ import ColumnSettings from './Shared/ColumnSetting';
 const DEFAULT_COLS = {
     category: true, line: false, group: false, itemCode: true, description: false, brand: false, 
     ln_price: false, cogs_price: false, cogs_currency: false, kmi_qty: true, kme_qty: true, 
-    total_qty: false, avg12m: false, avg6m: false, avg3m: false   
+    total_qty: false, avg12m: false, avg6m: false, avg3m: false, confirmed_qty: true   
 };
 
 type SortColumn = 'itemCode' | 'category';
@@ -25,6 +25,9 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
   const [sortConfig, setSortConfig] = useState<{ key: SortColumn, direction: SortDirection }>({ key: 'category', direction: 'asc' });
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const { visibleCols, toggleColumn } = useColumnVisibility('kmePlannerMasterColumnPrefs', DEFAULT_COLS);
+
+  // check if current user is an admin
+  const isAdmin = user.role_id === 2;
 
   const handleSort = (key: SortColumn) => {
       setSortConfig({ key, direction: sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc' });
@@ -42,20 +45,25 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
   }, [dbEntries, masterMonthFilter, dbLobs]);
 
   const forecastStatsMap = useMemo(() => {
-    const map: Record<number, { totalQty: number, totalNetSales: number, reps: Record<string, { qty: number, netSales: number }> }> = {};
+    const map: Record<number, { totalQty: number, totalConfirmedQty: number, totalNetSales: number, reps: Record<string, { qty: number, confirmedQty: number, netSales: number }> }> = {};
     dbEntries.forEach((entry: any) => {
         if (entry.planning_month === masterMonthFilter && Number(entry.planned_quantity) > 0) {
             const pid = Number(entry.product_id);
-            if (!map[pid]) map[pid] = { totalQty: 0, totalNetSales: 0, reps: {} };
+            if (!map[pid]) map[pid] = { totalQty: 0, totalConfirmedQty: 0, totalNetSales: 0, reps: {} };
             const lob = dbLobs?.find((l: any) => l.lob_id === entry.lob_id);
             const repName = lob ? (lob.sales_rep_name || lob.sales_representative_no || 'Unknown') : 'Unknown';
-            if (!map[pid].reps[repName]) map[pid].reps[repName] = { qty: 0, netSales: 0 };
+            if (!map[pid].reps[repName]) map[pid].reps[repName] = { qty: 0, confirmedQty: 0, netSales: 0 };
             
             const qty = Number(entry.planned_quantity);
+            const confirmedQty = Number(entry.confirmed_quantity || 0);
             const amount = Number(entry.total_amount);
+
             map[pid].reps[repName].qty += qty;
+            map[pid].reps[repName].confirmedQty += confirmedQty;
             map[pid].reps[repName].netSales += amount;
+            
             map[pid].totalQty += qty;
+            map[pid].totalConfirmedQty += confirmedQty;
             map[pid].totalNetSales += amount; 
         }
     });
@@ -66,13 +74,24 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
       let activeProducts = dbProducts.filter((p: any) => forecastStatsMap[p.product_id] !== undefined);
       activeProducts = activeProducts.map((prod: any) => {
           const stats = forecastStatsMap[prod.product_id];
-          let basePrice = dbPricing.find((p: any) => p.product_id === prod.product_id && p.lob_id === null) || dbPricing.find((p: any) => p.product_id === prod.product_id);
+          
+          // weighted average LN price calculation
+          let calculatedLnPrice = 0;
+          if (stats.totalQty > 0) {
+              calculatedLnPrice = stats.totalNetSales / stats.totalQty;
+          } else {
+              // Fallback to DB price only if there is 0 quantity in the forecast
+              const fallbackPrice = dbPricing.find((p: any) => p.product_id === prod.product_id && p.lob_id === null) 
+                                 || dbPricing.find((p: any) => p.product_id === prod.product_id);
+              if (fallbackPrice) calculatedLnPrice = Number(fallbackPrice.price);
+          }
+
           const cogsRaw = Number(prod.cogs_price) || 0;
           const isCogsUsd = (prod.cogs_currency || '').toUpperCase() === 'USD';
           
           return { 
-              ...prod, forecast_qty: stats.totalQty, net_sales: stats.totalNetSales, rep_data: stats.reps, 
-              ln_price: basePrice ? Number(basePrice.price) : 0, cogs_aed_value: isCogsUsd ? (cogsRaw * USD_TO_AED_RATE) : cogsRaw, is_cogs_usd: isCogsUsd
+              ...prod, forecast_qty: stats.totalQty, confirmed_qty: stats.totalConfirmedQty, net_sales: stats.totalNetSales, rep_data: stats.reps, 
+              ln_price: calculatedLnPrice, cogs_aed_value: isCogsUsd ? (cogsRaw * USD_TO_AED_RATE) : cogsRaw, is_cogs_usd: isCogsUsd
           };
       });
 
@@ -109,9 +128,13 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
 
           if (!activeProducts[i + 1] || activeProducts[i + 1].product_category !== row.product_category) {
               const sumCogsAed = currentGroup.reduce((sum, r) => sum + (r.cogs_aed_value || 0), 0);
-              const repSubtotals: Record<string, { qty: number, netSales: number }> = {};
+              const repSubtotals: Record<string, { qty: number, confirmedQty: number, netSales: number }> = {};
               activeReps.forEach(rep => {
-                  repSubtotals[rep] = { qty: currentGroup.reduce((sum, r) => sum + (r.rep_data[rep]?.qty || 0), 0), netSales: currentGroup.reduce((sum, r) => sum + (r.rep_data[rep]?.netSales || 0), 0) };
+                  repSubtotals[rep] = { 
+                      qty: currentGroup.reduce((sum, r) => sum + (r.rep_data[rep]?.qty || 0), 0), 
+                      confirmedQty: currentGroup.reduce((sum, r) => sum + (r.rep_data[rep]?.confirmedQty || 0), 0), 
+                      netSales: currentGroup.reduce((sum, r) => sum + (r.rep_data[rep]?.netSales || 0), 0) 
+                  };
               });
               
               dataWithSubtotals.push({
@@ -120,43 +143,68 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                   kmi_qty: currentGroup.reduce((sum, r) => sum + (Number(r.kmi_qty || r.kmmi_qty) || 0), 0), kme_qty: currentGroup.reduce((sum, r) => sum + (Number(r.kme_qty) || 0), 0),
                   total_qty: currentGroup.reduce((sum, r) => sum + (Number(r.total_qty) || 0), 0), avg_12m_sales: currentGroup.reduce((sum, r) => sum + (Number(r.avg_12m_sales) || 0), 0),
                   avg_6m_sales: currentGroup.reduce((sum, r) => sum + (Number(r.avg_6m_sales) || 0), 0), avg_3m_sales: currentGroup.reduce((sum, r) => sum + (Number(r.avg_3m_sales) || 0), 0),
-                  forecast_qty: currentGroup.reduce((sum, r) => sum + (r.forecast_qty || 0), 0), net_sales: currentGroup.reduce((sum, r) => sum + (r.net_sales || 0), 0), rep_subtotals: repSubtotals
+                  forecast_qty: currentGroup.reduce((sum, r) => sum + (r.forecast_qty || 0), 0), confirmed_qty: currentGroup.reduce((sum, r) => sum + (r.confirmed_qty || 0), 0), net_sales: currentGroup.reduce((sum, r) => sum + (r.net_sales || 0), 0), rep_subtotals: repSubtotals
               });
               currentGroup = [];
           }
       }
       return dataWithSubtotals;
-  }, [dbProducts, debouncedSearchTerm, forecastStatsMap, sortConfig, activeReps]);
+  }, [dbProducts, debouncedSearchTerm, forecastStatsMap, sortConfig, activeReps, dbPricing]);
 
   const { currentPage, totalPages, paginatedData, goToNextPage, goToPrevPage, setCurrentPage } = usePagination(masterProducts, ITEMS_PER_PAGE);
 
   useEffect(() => setCurrentPage(1), [debouncedSearchTerm, sortConfig, setCurrentPage]);
 
   const gridTotals = useMemo(() => {
-      const totals = { forecast_qty: 0, net_sales: 0, kmi_qty: 0, kme_qty: 0, total_qty: 0, reps: {} as Record<string, {qty: number, netSales: number}> };
-      activeReps.forEach(r => totals.reps[r] = {qty: 0, netSales: 0});
+      const totals = { forecast_qty: 0, confirmed_qty: 0, net_sales: 0, kmi_qty: 0, kme_qty: 0, total_qty: 0, reps: {} as Record<string, {qty: number, confirmedQty: number, netSales: number}> };
+      activeReps.forEach(r => totals.reps[r] = {qty: 0, confirmedQty: 0, netSales: 0});
       masterProducts.forEach((row: any) => {
           if (!row.isSubtotal) {
-              totals.forecast_qty += row.forecast_qty; totals.net_sales += row.net_sales;
+              totals.forecast_qty += row.forecast_qty; 
+              totals.confirmed_qty += row.confirmed_qty;
+              totals.net_sales += row.net_sales;
               totals.kmi_qty += Number(row.kmi_qty || row.kmmi_qty || 0); totals.kme_qty += Number(row.kme_qty || 0); totals.total_qty += Number(row.total_qty || 0);
-              activeReps.forEach(rep => { totals.reps[rep].qty += (row.rep_data[rep]?.qty || 0); totals.reps[rep].netSales += (row.rep_data[rep]?.netSales || 0); });
+              activeReps.forEach(rep => { 
+                  totals.reps[rep].qty += (row.rep_data[rep]?.qty || 0); 
+                  totals.reps[rep].confirmedQty += (row.rep_data[rep]?.confirmedQty || 0); 
+                  totals.reps[rep].netSales += (row.rep_data[rep]?.netSales || 0); 
+              });
           }
       });
       return totals;
   }, [masterProducts, activeReps]);
 
   const handleExportCSV = () => {
-    const headers = ['No', 'Product Category', 'Product Line', 'Product Group', 'Product Model', 'Item Code', 'Item Description', 'Brand', 'LN Price (AED)', 'COGS Price', 'COGS Currency', 'KMI On Hand', 'KME On Hand', 'Total On Hand', '12M Avg (Sales)', '6M Avg (Sales)', '3M Avg (Sales)', ...activeReps.flatMap(rep => [`${rep} (Qty)`, `${rep} (Price AED)`]), 'Total Forecast Qty', 'Total Net Sales (AED)'];
+    // hide  total columns in export if not admin
+    const adminHeaders = isAdmin ? (visibleCols.confirmed_qty ? ['Total Forecast Qty', 'Total Confirm Qty', 'Total Net Sales (AED)'] : ['Total Forecast Qty', 'Total Net Sales (AED)']) : [];
+    
+    const repHeaders = activeReps.flatMap(rep => {
+        const cols = [`${rep} (Forecast Qty)`];
+        if (visibleCols.confirmed_qty) cols.push(`${rep} (Confirm Qty)`);
+        cols.push(`${rep} (Price AED)`);
+        return cols;
+    });
+
+    const headers = ['No', 'Product Category', 'Product Line', 'Product Group', 'Product Model', 'Item Code', 'Item Description', 'Brand', 'LN Price (AED)', 'COGS Price', 'COGS Currency', 'KMI On Hand', 'KME On Hand', 'Total On Hand', '12M Avg (Sales)', '6M Avg (Sales)', '3M Avg (Sales)', ...repHeaders, ...adminHeaders];
+    
     const exportData = masterProducts.filter((prod: any) => !prod.isSubtotal);
     const rows = exportData.map((prod: any) => {
         const safeDesc = prod.item_description ? `"${prod.item_description.replace(/"/g, '""')}"` : '""';
-        const repExportCols = activeReps.flatMap(rep => { const repData = prod.rep_data[rep] || { qty: 0, netSales: 0 }; return [repData.qty, repData.netSales.toFixed(2)]; });
-        return [prod.display_index, `"${prod.product_category || '-'}"`, `"${prod.product_line || '-'}"`, `"${prod.item_group || '-'}"`, `"${prod.product_model || '-'}"`, `"${prod.item_code || '-'}"`, safeDesc, `"${prod.brand || '-'}"`, prod.ln_price > 0 ? prod.ln_price.toFixed(2) : '#N/A', prod.cogs_price ? Number(prod.cogs_price).toFixed(2) : '#N/A', prod.cogs_currency || '-', prod.kmi_qty || prod.kmmi_qty || 0, prod.kme_qty || 0, prod.total_qty || 0, Number(prod.avg_12m_sales || 0).toFixed(1), Number(prod.avg_6m_sales || 0).toFixed(1), Number(prod.avg_3m_sales || 0).toFixed(1), ...repExportCols, prod.forecast_qty || 0, (prod.net_sales || 0).toFixed(2)].join(',');
+        const repExportCols = activeReps.flatMap(rep => { 
+            const repData = prod.rep_data[rep] || { qty: 0, confirmedQty: 0, netSales: 0 }; 
+            return visibleCols.confirmed_qty ? [repData.qty, repData.confirmedQty, repData.netSales.toFixed(2)] : [repData.qty, repData.netSales.toFixed(2)]; 
+        });
+        
+        const adminData = isAdmin ? (visibleCols.confirmed_qty ? [prod.forecast_qty || 0, prod.confirmed_qty || 0, (prod.net_sales || 0).toFixed(2)] : [prod.forecast_qty || 0, (prod.net_sales || 0).toFixed(2)]) : [];
+
+        return [prod.display_index, `"${prod.product_category || '-'}"`, `"${prod.product_line || '-'}"`, `"${prod.item_group || '-'}"`, `"${prod.product_model || '-'}"`, `"${prod.item_code || '-'}"`, safeDesc, `"${prod.brand || '-'}"`, prod.ln_price > 0 ? prod.ln_price.toFixed(2) : '#N/A', prod.cogs_price ? Number(prod.cogs_price).toFixed(2) : '#N/A', prod.cogs_currency || '-', prod.kmi_qty || prod.kmmi_qty || 0, prod.kme_qty || 0, prod.total_qty || 0, Number(prod.avg_12m_sales || 0).toFixed(1), Number(prod.avg_6m_sales || 0).toFixed(1), Number(prod.avg_3m_sales || 0).toFixed(1), ...repExportCols, ...adminData].join(',');
     });
     downloadCSV(`Summary_by_Items_${masterMonthFilter}.csv`, headers, rows);
   };
 
-  const activeColCount = 4 + Object.values(visibleCols).filter(Boolean).length + (activeReps.length * 2);
+  let activeColCount = 4 + Object.values(visibleCols).filter(Boolean).length + (activeReps.length * (visibleCols.confirmed_qty ? 3 : 2));
+  if (isAdmin) activeColCount += (visibleCols.confirmed_qty ? 3 : 2); // Add span for admin columns
+
   let colSpanOffset = 1; 
   if (visibleCols.category) colSpanOffset++; if (visibleCols.line) colSpanOffset++; if (visibleCols.group) colSpanOffset++;
   if (visibleCols.itemCode) colSpanOffset++; if (visibleCols.description) colSpanOffset++; if (visibleCols.brand) colSpanOffset++;
@@ -194,6 +242,8 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.avg12m} onChange={() => toggleColumn('avg12m')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />12M Avg (Sales)</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.avg6m} onChange={() => toggleColumn('avg6m')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />6M Avg (Sales)</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.avg3m} onChange={() => toggleColumn('avg3m')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />3M Avg (Sales)</label>
+                  <div className="border-t border-slate-100 my-1 pt-1"></div>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-emerald-600"><input type="checkbox" checked={visibleCols.confirmed_qty} onChange={() => toggleColumn('confirmed_qty')} className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />Confirmed Qty</label>
               </ColumnSettings>
 
               <button onClick={handleExportCSV} disabled={masterProducts.length === 0} className="flex items-center gap-2 text-xs font-bold bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm">
@@ -232,12 +282,24 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                         {visibleCols.avg3m && <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center">3M Avg (Sales)</th>}
                         {activeReps.map(rep => (
                             <React.Fragment key={rep}>
-                                <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)] border-l-slate-400"><div>{rep}</div><div className="font-normal opacity-80">Qty</div></th>
+                                <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)] border-l-slate-400"><div>{rep}</div><div className="font-normal opacity-80">Forecast Qty</div></th>
+                                {visibleCols.confirmed_qty && (
+                                    <th className="border border-slate-300 bg-emerald-100 px-3 py-2 text-emerald-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]"><div>{rep}</div><div className="font-normal opacity-80">Confirm Qty</div></th>
+                                )}
                                 <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]"><div>{rep}</div><div className="font-normal opacity-80">Price (AED)</div></th>
                             </React.Fragment>
                         ))}
-                        <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg border-l-slate-400"><div>Total Forecast</div><div className="font-normal opacity-80">Qty</div></th>
-                        <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg"><div>Total Forecast</div><div className="font-normal opacity-80">Net Sales (AED)</div></th>
+                        
+                        {/* HIDE IF NOT ADMIN */}
+                        {isAdmin && (
+                            <>
+                                <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg border-l-slate-400"><div>Total Forecast</div><div className="font-normal opacity-80">Qty</div></th>
+                                {visibleCols.confirmed_qty && (
+                                    <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg"><div>Total Confirm</div><div className="font-normal opacity-80">Qty</div></th>
+                                )}
+                                <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg"><div>Total Forecast</div><div className="font-normal opacity-80">Net Sales (AED)</div></th>
+                            </>
+                        )}
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -257,16 +319,28 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                                     {visibleCols.avg6m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800">{prod.avg_6m_sales.toFixed(1)}</td>}
                                     {visibleCols.avg3m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800">{prod.avg_3m_sales.toFixed(1)}</td>}
                                     {activeReps.map(rep => {
-                                        const repData = prod.rep_subtotals[rep] || { qty: 0, netSales: 0 };
+                                        const repData = prod.rep_subtotals[rep] || { qty: 0, confirmedQty: 0, netSales: 0 };
                                         return (
                                             <React.Fragment key={rep}>
                                                 <td className={`border border-slate-300 bg-blue-100/60 px-3 py-2 text-center border-l-slate-300 ${repData.qty > 0 ? 'text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.qty : '-'}</td>
+                                                {visibleCols.confirmed_qty && (
+                                                    <td className={`border border-slate-300 bg-emerald-100/60 px-3 py-2 text-center ${repData.confirmedQty > 0 ? 'text-emerald-900' : 'text-slate-300'}`}>{repData.confirmedQty > 0 ? repData.confirmedQty : '-'}</td>
+                                                )}
                                                 <td className={`border border-slate-300 bg-blue-100/60 px-3 py-2 text-right ${repData.qty > 0 ? 'text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.netSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
                                             </React.Fragment>
                                         );
                                     })}
-                                    <td className="border border-slate-300 bg-emerald-200/60 px-3 py-2 text-center text-slate-900 shadow-inner border-l-slate-400">{prod.forecast_qty > 0 ? prod.forecast_qty : '-'}</td>
-                                    <td className="border border-slate-300 bg-emerald-200/60 px-3 py-2 text-right text-slate-900 shadow-inner">{prod.forecast_qty > 0 ? prod.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                    
+                                    {/* HIDE IF NOT ADMIN */}
+                                    {isAdmin && (
+                                        <>
+                                            <td className="border border-slate-300 bg-emerald-200/60 px-3 py-2 text-center text-slate-900 shadow-inner border-l-slate-400">{prod.forecast_qty > 0 ? prod.forecast_qty : '-'}</td>
+                                            {visibleCols.confirmed_qty && (
+                                                <td className="border border-slate-300 bg-emerald-200/60 px-3 py-2 text-center text-slate-900 shadow-inner">{prod.confirmed_qty > 0 ? prod.confirmed_qty : '-'}</td>
+                                            )}
+                                            <td className="border border-slate-300 bg-emerald-200/60 px-3 py-2 text-right text-slate-900 shadow-inner">{prod.forecast_qty > 0 ? prod.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                        </>
+                                    )}
                                 </tr>
                             );
                         }
@@ -295,16 +369,28 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                                 {visibleCols.avg6m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-700 bg-blue-50/30">{Number(prod.avg_6m_sales || 0).toFixed(1)}</td>}
                                 {visibleCols.avg3m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800 bg-blue-100/20">{Number(prod.avg_3m_sales || 0).toFixed(1)}</td>}
                                 {activeReps.map(rep => {
-                                    const repData = prod.rep_data[rep] || { qty: 0, netSales: 0 };
+                                    const repData = prod.rep_data[rep] || { qty: 0, confirmedQty: 0, netSales: 0 };
                                     return (
                                         <React.Fragment key={rep}>
                                             <td className={`border border-slate-200 px-3 py-2 text-center border-l-slate-300 ${repData.qty > 0 ? 'bg-blue-50 text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.qty : '-'}</td>
+                                            {visibleCols.confirmed_qty && (
+                                                <td className={`border border-slate-200 px-3 py-2 text-center ${repData.confirmedQty > 0 ? 'bg-emerald-50 text-emerald-900' : 'text-slate-300'}`}>{repData.confirmedQty > 0 ? repData.confirmedQty : '-'}</td>
+                                            )}
                                             <td className={`border border-slate-200 px-3 py-2 text-right ${repData.qty > 0 ? 'bg-blue-50 text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.netSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
                                         </React.Fragment>
                                     );
                                 })}
-                                <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-400 ${prod.forecast_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{prod.forecast_qty > 0 ? prod.forecast_qty : '-'}</td>
-                                <td className={`border border-slate-300 px-3 py-2 text-right ${prod.forecast_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{prod.forecast_qty > 0 ? prod.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                
+                                {/* HIDE IF NOT ADMIN */}
+                                {isAdmin && (
+                                    <>
+                                        <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-400 ${prod.forecast_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{prod.forecast_qty > 0 ? prod.forecast_qty : '-'}</td>
+                                        {visibleCols.confirmed_qty && (
+                                            <td className={`border border-slate-300 px-3 py-2 text-center ${prod.confirmed_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{prod.confirmed_qty > 0 ? prod.confirmed_qty : '-'}</td>
+                                        )}
+                                        <td className={`border border-slate-300 px-3 py-2 text-right ${prod.forecast_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{prod.forecast_qty > 0 ? prod.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                    </>
+                                )}
                             </tr>
                         );
                     })}
@@ -327,11 +413,23 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                             {activeReps.map(rep => (
                                 <React.Fragment key={rep}>
                                     <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-300 ${gridTotals.reps[rep].qty > 0 ? 'bg-blue-100/60 text-slate-900' : 'text-slate-400'}`}>{gridTotals.reps[rep].qty > 0 ? gridTotals.reps[rep].qty : '-'}</td>
+                                    {visibleCols.confirmed_qty && (
+                                        <td className={`border border-slate-300 px-3 py-2 text-center ${gridTotals.reps[rep].confirmedQty > 0 ? 'bg-emerald-100/60 text-emerald-900' : 'text-slate-400'}`}>{gridTotals.reps[rep].confirmedQty > 0 ? gridTotals.reps[rep].confirmedQty : '-'}</td>
+                                    )}
                                     <td className={`border border-slate-300 px-3 py-2 text-right ${gridTotals.reps[rep].qty > 0 ? 'bg-blue-100/60 text-slate-900' : 'text-slate-400'}`}>{gridTotals.reps[rep].qty > 0 ? gridTotals.reps[rep].netSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
                                 </React.Fragment>
                             ))}
-                            <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-400 ${gridTotals.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.forecast_qty > 0 ? gridTotals.forecast_qty : '-'}</td>
-                            <td className={`border border-slate-300 px-3 py-2 text-right ${gridTotals.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.forecast_qty > 0 ? gridTotals.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                            
+                            {/* HIDE IF NOT ADMIN */}
+                            {isAdmin && (
+                                <>
+                                    <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-400 ${gridTotals.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.forecast_qty > 0 ? gridTotals.forecast_qty : '-'}</td>
+                                    {visibleCols.confirmed_qty && (
+                                        <td className={`border border-slate-300 px-3 py-2 text-center ${gridTotals.confirmed_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.confirmed_qty > 0 ? gridTotals.confirmed_qty : '-'}</td>
+                                    )}
+                                    <td className={`border border-slate-300 px-3 py-2 text-right ${gridTotals.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.forecast_qty > 0 ? gridTotals.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                </>
+                            )}
                         </tr>
                     </tfoot>
                 )}

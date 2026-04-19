@@ -209,7 +209,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
 
   const exportEntriesToCSV = () => {
     if (filteredEntries.length === 0) return showNotification('No entries to export.');
-    const headers = ['Month', 'BP Code', 'Product Line', 'Model', 'Plan Qty', 'Confirmed Qty', 'Net Sales (AED)'];
+    const headers = ['Month', 'BP Code', 'Product Line', 'Product Model', 'Plan Qty', 'Confirmed Qty', 'Net Sales (AED)'];
     const rows = filteredEntries.map((entry: any) => {
         const bp = dbLobs.find((l:any) => l.lob_id === entry.lob_id)?.sold_to_bp || 'Unknown';
         const productMatch = dbProducts.find((p:any) => p.product_id === entry.product_id);
@@ -246,7 +246,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                   <input type="month" min={getNextMonthString()} value={planningMonth} onChange={(e) => setPlanningMonth(e.target.value)} className="w-full border-slate-300 rounded-lg h-[36px] text-sm focus:ring-blue-500" />
               </div>
               
-              {/*  show the Admin who owns this LOB */}
+              {/* show the Admin who owns this LOB */}
               {user.role_id === 2 && selectedLob && (
                   <div className="bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg flex flex-col justify-center">
                       <span className="text-[9px] font-black text-amber-600 uppercase tracking-wider"></span>
@@ -285,10 +285,10 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                     <thead className="sticky top-0 z-20 shadow-sm text-[10px] uppercase tracking-wider text-slate-500 bg-white">
                         <tr>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100 w-12 text-center">No</th>
-                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100">Item Code</th>
-                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100">Model</th>
-                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100">Description</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100">LOB</th>
+                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100">Product Model</th>
+                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100">Item Code</th>
+                            <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100">Description</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100 text-right">Price AED</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-slate-100 text-right">COGS AED</th>
                             <th className="border-b border-slate-200 px-4 py-3 font-bold bg-blue-50 text-blue-700 text-center border-l border-l-slate-200 w-32 shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]">Forecast Qty</th>
@@ -322,10 +322,10 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                             return (
                                 <tr key={prod.product_id} className={`transition-colors ${isRowModified ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
                                     <td className="px-4 py-2 font-mono text-slate-400 text-center">{actualIdx}</td>
-                                    <td className="px-4 py-2 font-mono text-slate-500">{prod.item_code}</td>
-                                    <td className="px-4 py-2 font-bold text-slate-800">{prod.product_model}</td>
-                                    <td className="px-4 py-2 text-slate-600 truncate max-w-[200px]" title={prod.item_description}>{prod.item_description}</td>
                                     <td className="px-4 py-2 font-medium text-slate-700 truncate max-w-[120px]">{currentLobName}</td>
+                                    <td className="px-4 py-2 font-bold text-slate-800">{prod.product_model}</td>
+                                    <td className="px-4 py-2 font-mono text-slate-500">{prod.item_code}</td>
+                                    <td className="px-4 py-2 text-slate-600 truncate max-w-[200px]" title={prod.item_description}>{prod.item_description}</td>
                                     <td className="px-4 py-2 text-right font-medium text-slate-500">{prod.master_price_aed > 0 ? prod.master_price_aed.toFixed(2) : '-'}</td>
                                     
                                     <td className="px-4 py-2 text-right font-medium text-slate-500">
@@ -391,7 +391,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                 <th className="px-6 py-4 bg-white">Month</th>
                 <th className="px-6 py-4 bg-white">BP Code</th>
                 <th className="px-6 py-4 bg-white">Product Line</th>
-                <th className="px-6 py-4 bg-white">Model</th>
+                <th className="px-6 py-4 bg-white">Product Model</th>
                 <th className="px-6 py-4 text-center bg-white">Plan Qty</th>
                 <th className="px-6 py-4 text-center bg-white text-emerald-700">Confirm Qty</th>
                 <th className="px-6 py-4 text-right bg-white">Net Sales (AED)</th>

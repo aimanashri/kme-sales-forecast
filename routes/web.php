@@ -3,10 +3,14 @@
 use App\Http\Controllers\ProfileController;
 use App\Http\Controllers\ForecastController;
 use App\Http\Controllers\Auth\MicrosoftController;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 
 Route::get('/', function () {
+    if (Auth::check()) {
+        return redirect()->route('forecast');
+    }
     return redirect()->route('login');
 });
 

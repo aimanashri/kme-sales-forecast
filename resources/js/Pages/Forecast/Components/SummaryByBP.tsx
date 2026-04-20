@@ -12,59 +12,54 @@ import Pagination from './Shared/Pagination';
 import ColumnSettings from './Shared/ColumnSetting';
 
 const DEFAULT_COLS = {
-    bpName: true, category: true, line: false, group: false, itemCode: true, description: false, 
+    salesRep: true, bpName: true, lobName: true, category: true, line: false, group: false, itemCode: true, description: false, 
     brand: false, ln_price: false, cogs_price: false, cogs_currency: false, kmi_qty: true, 
-    kme_qty: true, total_qty: false, avg12m: false, avg6m: false, avg3m: false   
+    kme_qty: true, total_qty: false, avg12m: false, avg6m: false, avg3m: false, confirmed_qty: true   
 };
 
-type SortColumn = 'bpName' | 'itemCode' | 'category';
+type SortColumn = 'lobName' | 'bpName' | 'itemCode' | 'category' | 'salesRep';
 type SortDirection = 'asc' | 'desc';
 
 export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, searchTerm, user }: any) {
   const [monthFilter, setMonthFilter] = useState(getNextMonthString());
-  const [sortConfig, setSortConfig] = useState<{ key: SortColumn, direction: SortDirection }>({ key: 'bpName', direction: 'asc' });
+  const [sortConfig, setSortConfig] = useState<{ key: SortColumn, direction: SortDirection }>({ key: 'salesRep', direction: 'asc' });
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
   const { visibleCols, toggleColumn } = useColumnVisibility('kmePlannerBPColumnPrefs', DEFAULT_COLS);
+
+  const isAdmin = user.role_id === 2;
 
   const handleSort = (key: SortColumn) => {
       setSortConfig({ key, direction: sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc' });
   };
 
-  const activeReps = useMemo(() => {
-      const reps = new Set<string>();
-      dbEntries.forEach((e: any) => {
-          if (e.planning_month === monthFilter && Number(e.planned_quantity) > 0) {
-              const lob = dbLobs?.find((l: any) => l.lob_id === e.lob_id);
-              if (lob) reps.add(lob.sales_rep_name || lob.sales_representative_no || 'Unknown');
-          }
-      });
-      return Array.from(reps).sort(); 
-  }, [dbEntries, monthFilter, dbLobs]);
-
   const { bpStatsMap } = useMemo(() => {
-      const statsMap: Record<string, { totalQty: number, totalNetSales: number, lob_code: string, lob_name: string, product_id: number, reps: Record<string, { qty: number, netSales: number }> }> = {};
+      const statsMap: Record<string, { totalQty: number, totalConfirmedQty: number, totalNetSales: number, lob_code: string, lob_name: string, rep_name: string, bp_name: string, product_id: number }> = {};
 
       dbEntries.forEach((entry: any) => {
           if (entry.planning_month === monthFilter && Number(entry.planned_quantity) > 0) {
               const lob = dbLobs?.find((l: any) => l.lob_id === entry.lob_id);
               if (!lob) return;
 
-              const bpCode = lob.sold_to_bp || lob.lob_code || 'Unknown';
-              const bpName = lob.sold_to_bp_name || lob.lob_name || '-';
+              const lobName = lob.lob_name || '-';
               const repName = lob.sales_rep_name || lob.sales_representative_no || 'Unknown';
+              const bpName = lob.sold_to_bp_name || lob.sold_to_bp || '-';
+              const bpCode = lob.sold_to_bp || lob.lob_code || 'Unknown';
               const pid = Number(entry.product_id);
-              const key = `${bpCode}-${pid}`;
               
-              if (!statsMap[key]) statsMap[key] = { totalQty: 0, totalNetSales: 0, lob_code: bpCode, lob_name: bpName, product_id: pid, reps: {} };
-              if (!statsMap[key].reps[repName]) statsMap[key].reps[repName] = { qty: 0, netSales: 0 };
+              //  ensures uniqueness across the entire hierarchy
+              const key = `${repName}-${bpName}-${lobName}-${pid}`;
+              
+              if (!statsMap[key]) {
+                  statsMap[key] = { totalQty: 0, totalConfirmedQty: 0, totalNetSales: 0, lob_code: bpCode, lob_name: lobName, rep_name: repName, bp_name: bpName, product_id: pid };
+              }
 
               const qty = Number(entry.planned_quantity);
+              const confirmedQty = Number(entry.confirmed_quantity || 0);
               const amount = Number(entry.total_amount);
 
-              statsMap[key].reps[repName].qty += qty;
-              statsMap[key].reps[repName].netSales += amount;
               statsMap[key].totalQty += qty;
+              statsMap[key].totalConfirmedQty += confirmedQty;
               statsMap[key].totalNetSales += amount; 
           }
       });
@@ -76,21 +71,28 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
           const prod = dbProducts.find((p: any) => p.product_id === stat.product_id) || {};
           const matchingLobs = dbLobs.filter((l: any) => (l.sold_to_bp || l.lob_code) === stat.lob_code).map((l: any) => l.lob_id);
           let basePrice = dbPricing.find((p: any) => p.product_id === stat.product_id && matchingLobs.includes(p.lob_id)) || dbPricing.find((p: any) => p.product_id === stat.product_id && p.lob_id === null);
+          let exactLnPrice: number | null = null;
+          if (basePrice) {
+              exactLnPrice = Number(basePrice.price);
+          }
 
           const cogsRaw = Number(prod.cogs_price) || 0;
           const isCogsUsd = (prod.cogs_currency || '').toUpperCase() === 'USD';
 
           return {
-              ...prod, unique_key: `${stat.lob_code}-${stat.product_id}`, lob_name: stat.lob_name, lob_code: stat.lob_code,
-              sales_rep_name: Array.from(activeReps).join(', ') || '-', forecast_qty: stat.totalQty, net_sales: stat.totalNetSales, 
-              rep_data: stat.reps, ln_price: basePrice ? Number(basePrice.price) : null, cogs_aed_value: isCogsUsd ? (cogsRaw * USD_TO_AED_RATE) : cogsRaw, is_cogs_usd: isCogsUsd
+              ...prod, unique_key: `${stat.rep_name}-${stat.bp_name}-${stat.lob_name}-${stat.product_id}`, 
+              lob_name: stat.lob_name, sales_rep_name: stat.rep_name, bp_name: stat.bp_name, bp_code: stat.lob_code,
+              forecast_qty: stat.totalQty, confirmed_qty: stat.totalConfirmedQty, net_sales: stat.totalNetSales, 
+              ln_price: exactLnPrice, cogs_aed_value: isCogsUsd ? (cogsRaw * USD_TO_AED_RATE) : cogsRaw, is_cogs_usd: isCogsUsd
           };
       });
 
       if (debouncedSearchTerm) {
           const lower = debouncedSearchTerm.toLowerCase();
           activeData = activeData.filter((item: any) => 
-              (item.lob_name || '').toLowerCase().includes(lower) || (item.lob_code || '').toLowerCase().includes(lower) ||
+              (item.sales_rep_name || '').toLowerCase().includes(lower) || 
+              (item.bp_name || '').toLowerCase().includes(lower) || (item.bp_code || '').toLowerCase().includes(lower) ||
+              (item.lob_name || '').toLowerCase().includes(lower) || 
               (item.product_model || '').toLowerCase().includes(lower) || (item.item_code || '').toLowerCase().includes(lower) ||
               (item.item_description || '').toLowerCase().includes(lower) || (item.product_category || '').toLowerCase().includes(lower) ||
               (item.product_line || '').toLowerCase().includes(lower) || (item.brand || '').toLowerCase().includes(lower)
@@ -99,10 +101,20 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
 
       activeData.sort((a: any, b: any) => {
           const dir = sortConfig.direction === 'asc' ? 1 : -1;
-          const bpCompare = (a.lob_name || '').localeCompare(b.lob_name || '');
+          
+          //  Sorting: Rep -> BP -> LOB -> Category -> Model
+          const repCompare = (a.sales_rep_name || '').localeCompare(b.sales_rep_name || '');
+          if (repCompare !== 0) return sortConfig.key === 'salesRep' ? repCompare * dir : repCompare;
+
+          const bpCompare = (a.bp_name || '').localeCompare(b.bp_name || '');
           if (bpCompare !== 0) return sortConfig.key === 'bpName' ? bpCompare * dir : bpCompare;
+          
+          const lobCompare = (a.lob_name || '').localeCompare(b.lob_name || '');
+          if (lobCompare !== 0) return sortConfig.key === 'lobName' ? lobCompare * dir : lobCompare;
+          
           const catCompare = (a.product_category || '').localeCompare(b.product_category || '');
-          if (catCompare !== 0) return catCompare;
+          if (catCompare !== 0) return sortConfig.key === 'category' ? catCompare * dir : catCompare;
+          
           return (a.product_model || '').localeCompare(b.product_model || '');
       });
 
@@ -117,58 +129,65 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
           currentGroup.push(row);
 
           const nextRow = activeData[i + 1];
-          if (!nextRow || nextRow.lob_code !== row.lob_code || nextRow.product_category !== row.product_category) {
+          if (!nextRow || 
+              nextRow.sales_rep_name !== row.sales_rep_name || 
+              nextRow.bp_name !== row.bp_name || 
+              nextRow.lob_name !== row.lob_name || 
+              nextRow.product_category !== row.product_category) {
+              
               const sumCogsAed = currentGroup.reduce((sum, r) => sum + (r.cogs_aed_value || 0), 0);
-              const repSubtotals: Record<string, { qty: number, netSales: number }> = {};
-              activeReps.forEach(rep => {
-                  repSubtotals[rep] = { qty: currentGroup.reduce((sum, r) => sum + (r.rep_data[rep]?.qty || 0), 0), netSales: currentGroup.reduce((sum, r) => sum + (r.rep_data[rep]?.netSales || 0), 0) };
-              });
 
               dataWithSubtotals.push({
-                  isSubtotal: true, unique_key: `subtotal-${row.lob_code}-${row.product_category}`, lob_name: row.lob_name, lob_code: row.lob_code,
+                  isSubtotal: true, unique_key: `subtotal-${row.sales_rep_name}-${row.bp_name}-${row.lob_name}-${row.product_category}`, 
+                  lob_name: row.lob_name, sales_rep_name: row.sales_rep_name, bp_name: row.bp_name, bp_code: row.bp_code,
                   product_category: row.product_category || 'Uncategorized', ln_price: currentGroup.reduce((sum, r) => sum + (r.ln_price || 0), 0),
                   cogs_aed_value: sumCogsAed, cogs_usd_value: sumCogsAed / USD_TO_AED_RATE, kmi_qty: currentGroup.reduce((sum, r) => sum + (Number(r.kmi_qty || r.kmmi_qty) || 0), 0),
                   kme_qty: currentGroup.reduce((sum, r) => sum + (Number(r.kme_qty) || 0), 0), total_qty: currentGroup.reduce((sum, r) => sum + (Number(r.total_qty) || 0), 0),
                   avg_12m_sales: currentGroup.reduce((sum, r) => sum + (Number(r.avg_12m_sales) || 0), 0), avg_6m_sales: currentGroup.reduce((sum, r) => sum + (Number(r.avg_6m_sales) || 0), 0),
                   avg_3m_sales: currentGroup.reduce((sum, r) => sum + (Number(r.avg_3m_sales) || 0), 0), forecast_qty: currentGroup.reduce((sum, r) => sum + (r.forecast_qty || 0), 0),
-                  net_sales: currentGroup.reduce((sum, r) => sum + (r.net_sales || 0), 0), rep_subtotals: repSubtotals
+                  confirmed_qty: currentGroup.reduce((sum, r) => sum + (r.confirmed_qty || 0), 0), net_sales: currentGroup.reduce((sum, r) => sum + (r.net_sales || 0), 0)
               });
               currentGroup = [];
           }
       }
       return dataWithSubtotals;
-  }, [dbEntries, monthFilter, dbProducts, dbLobs, dbPricing, debouncedSearchTerm, sortConfig, bpStatsMap, activeReps]);
+  }, [dbEntries, monthFilter, dbProducts, dbLobs, dbPricing, debouncedSearchTerm, sortConfig, bpStatsMap]);
 
   const { currentPage, totalPages, paginatedData, goToNextPage, goToPrevPage, setCurrentPage } = usePagination(bpSummaryData, ITEMS_PER_PAGE);
 
   useEffect(() => setCurrentPage(1), [debouncedSearchTerm, sortConfig, setCurrentPage]);
 
   const gridTotals = useMemo(() => {
-      const totals = { forecast_qty: 0, net_sales: 0, kmi_qty: 0, kme_qty: 0, total_qty: 0, reps: {} as Record<string, {qty: number, netSales: number}> };
-      activeReps.forEach(r => totals.reps[r] = {qty: 0, netSales: 0});
+      const totals = { forecast_qty: 0, confirmed_qty: 0, net_sales: 0, kmi_qty: 0, kme_qty: 0, total_qty: 0 };
       bpSummaryData.forEach((row: any) => {
           if (!row.isSubtotal) {
-              totals.forecast_qty += row.forecast_qty; totals.net_sales += row.net_sales;
+              totals.forecast_qty += row.forecast_qty; 
+              totals.confirmed_qty += row.confirmed_qty;
+              totals.net_sales += row.net_sales;
               totals.kmi_qty += Number(row.kmi_qty || row.kmmi_qty || 0); totals.kme_qty += Number(row.kme_qty || 0); totals.total_qty += Number(row.total_qty || 0);
-              activeReps.forEach(rep => { totals.reps[rep].qty += (row.rep_data[rep]?.qty || 0); totals.reps[rep].netSales += (row.rep_data[rep]?.netSales || 0); });
           }
       });
       return totals;
-  }, [bpSummaryData, activeReps]);
+  }, [bpSummaryData]);
 
   const exportToCSV = () => {
     if (bpSummaryData.length === 0) return;
-    const headers = ['No', 'BP Name', 'BP Code', 'Product Category', 'Product Line', 'Product Group', 'Product Model', 'Item Code', 'Item Description', 'Brand', 'LN Price (AED)', 'COGS Price', 'COGS Currency', 'KMI On Hand', 'KME On Hand', 'Total On Hand', '12M Avg (Sales)', '6M Avg (Sales)', '3M Avg (Sales)', ...activeReps.flatMap(rep => [`${rep} (Qty)`, `${rep} (Price AED)`]), 'Total Forecast Qty', 'Total Net Sales (AED)'];
+    
+    const qtyHeaders = visibleCols.confirmed_qty ? ['Total Forecast Qty', 'Total Confirm Qty', 'Total Net Sales (AED)'] : ['Total Forecast Qty', 'Total Net Sales (AED)'];
+    const headers = ['No', 'Sales Rep', 'BP Name', 'BP Code', 'LOB', 'Product Category', 'Product Line', 'Product Group', 'Product Model', 'Item Code', 'Item Description', 'Brand', 'LN Price (AED)', 'COGS Price', 'COGS Currency', 'KMI On Hand', 'KME On Hand', 'Total On Hand', '12M Avg (Sales)', '6M Avg (Sales)', '3M Avg (Sales)', ...qtyHeaders];
+    
     const exportData = bpSummaryData.filter((item: any) => !item.isSubtotal);
     const rows = exportData.map((item: any) => {
         const safeDesc = item.item_description ? `"${item.item_description.replace(/"/g, '""')}"` : '""';
-        const repExportCols = activeReps.flatMap(rep => { const repData = item.rep_data[rep] || { qty: 0, netSales: 0 }; return [repData.qty, repData.netSales.toFixed(2)]; });
-        return [item.display_index, `"${item.lob_name || '-'}"`, `"${item.lob_code || '-'}"`, `"${item.product_category || '-'}"`, `"${item.product_line || '-'}"`, `"${item.item_group || '-'}"`, `"${item.product_model || '-'}"`, `"${item.item_code || '-'}"`, safeDesc, `"${item.brand || '-'}"`, item.ln_price !== null ? item.ln_price.toFixed(2) : '#N/A', item.cogs_price ? Number(item.cogs_price).toFixed(2) : '#N/A', item.cogs_currency || '-', item.kmi_qty || item.kmmi_qty || 0, item.kme_qty || 0, item.total_qty || 0, Number(item.avg_12m_sales || 0).toFixed(1), Number(item.avg_6m_sales || 0).toFixed(1), Number(item.avg_3m_sales || 0).toFixed(1), ...repExportCols, item.forecast_qty || 0, (item.net_sales || 0).toFixed(2)].join(',');
+        const qtyData = visibleCols.confirmed_qty ? [item.forecast_qty || 0, item.confirmed_qty || 0, (item.net_sales || 0).toFixed(2)] : [item.forecast_qty || 0, (item.net_sales || 0).toFixed(2)];
+
+        return [item.display_index, `"${item.sales_rep_name || '-'}"`, `"${item.bp_name || '-'}"`, `"${item.bp_code || '-'}"`, `"${item.lob_name || '-'}"`, `"${item.product_category || '-'}"`, `"${item.product_line || '-'}"`, `"${item.item_group || '-'}"`, `"${item.product_model || '-'}"`, `"${item.item_code || '-'}"`, safeDesc, `"${item.brand || '-'}"`, item.ln_price !== null ? item.ln_price.toFixed(2) : '#N/A', item.cogs_price ? Number(item.cogs_price).toFixed(2) : '#N/A', item.cogs_currency || '-', item.kmi_qty || item.kmmi_qty || 0, item.kme_qty || 0, item.total_qty || 0, Number(item.avg_12m_sales || 0).toFixed(1), Number(item.avg_6m_sales || 0).toFixed(1), Number(item.avg_3m_sales || 0).toFixed(1), ...qtyData].join(',');
     });
     downloadCSV(`Summary_by_BP_${monthFilter}.csv`, headers, rows);
   };
 
-  const activeColCount = 4 + Object.values(visibleCols).filter(Boolean).length + (activeReps.length * 2);
+  let activeColCount = 3 + Object.values(visibleCols).filter(Boolean).length; 
+
   let subtotalColSpan = 1; 
   if (visibleCols.category) subtotalColSpan++; if (visibleCols.line) subtotalColSpan++; if (visibleCols.group) subtotalColSpan++;
   if (visibleCols.itemCode) subtotalColSpan++; if (visibleCols.description) subtotalColSpan++; if (visibleCols.brand) subtotalColSpan++;
@@ -188,7 +207,9 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
               <div className="text-xs text-slate-500 font-bold bg-slate-200 px-3 py-1.5 rounded-full">{bpSummaryData.filter(d => !d.isSubtotal).length} Rows</div>
               
               <ColumnSettings>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.salesRep} onChange={() => toggleColumn('salesRep')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />Sales Rep</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.bpName} onChange={() => toggleColumn('bpName')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />BP Name</label>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.lobName} onChange={() => toggleColumn('lobName')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />LOB</label>
                   <div className="border-t border-slate-100 my-1 pt-1"></div>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.category} onChange={() => toggleColumn('category')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />Product Category</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.line} onChange={() => toggleColumn('line')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />Product Line</label>
@@ -208,6 +229,8 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.avg12m} onChange={() => toggleColumn('avg12m')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />12M Avg (Sales)</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.avg6m} onChange={() => toggleColumn('avg6m')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />6M Avg (Sales)</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.avg3m} onChange={() => toggleColumn('avg3m')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />3M Avg (Sales)</label>
+                  <div className="border-t border-slate-100 my-1 pt-1"></div>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-emerald-600"><input type="checkbox" checked={visibleCols.confirmed_qty} onChange={() => toggleColumn('confirmed_qty')} className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />Confirmed Qty</label>
               </ColumnSettings>
 
               <button onClick={exportToCSV} disabled={bpSummaryData.length === 0} className="flex items-center gap-2 text-xs font-bold bg-white border border-slate-300 text-slate-700 px-3 py-1.5 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed shadow-sm">
@@ -220,9 +243,20 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                 <thead className="sticky top-0 z-20 shadow-sm">
                     <tr>
                         <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold text-center">No</th>
+                        
+                        {visibleCols.salesRep && (
+                            <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold hover:bg-[#cde4bf] transition-colors cursor-pointer group" onClick={() => handleSort('salesRep')}>
+                                <div className="flex items-center justify-between gap-2">Sales Rep {sortConfig.key === 'salesRep' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-blue-600"/> : <ArrowDown size={14} className="text-blue-600"/>) : <ArrowUpDown size={14} className="opacity-30 group-hover:opacity-100" />}</div>
+                            </th>
+                        )}
                         {visibleCols.bpName && (
                             <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold hover:bg-[#cde4bf] transition-colors cursor-pointer group" onClick={() => handleSort('bpName')}>
                                 <div className="flex items-center justify-between gap-2">BP Name {sortConfig.key === 'bpName' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-blue-600"/> : <ArrowDown size={14} className="text-blue-600"/>) : <ArrowUpDown size={14} className="opacity-30 group-hover:opacity-100" />}</div>
+                            </th>
+                        )}
+                        {visibleCols.lobName && (
+                            <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold hover:bg-[#cde4bf] transition-colors cursor-pointer group" onClick={() => handleSort('lobName')}>
+                                <div className="flex items-center justify-between gap-2">LOB {sortConfig.key === 'lobName' ? (sortConfig.direction === 'asc' ? <ArrowUp size={14} className="text-blue-600"/> : <ArrowDown size={14} className="text-blue-600"/>) : <ArrowUpDown size={14} className="opacity-30 group-hover:opacity-100" />}</div>
                             </th>
                         )}
                         {visibleCols.category && <th className="border border-slate-300 bg-[#e2f0d9] px-3 py-2 text-slate-800 font-bold">Product Category</th>}
@@ -241,24 +275,33 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                         {visibleCols.avg12m && <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center">12M Avg (Sales)</th>}
                         {visibleCols.avg6m && <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center">6M Avg (Sales)</th>}
                         {visibleCols.avg3m && <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center">3M Avg (Sales)</th>}
-                        {activeReps.map(rep => (
-                            <React.Fragment key={rep}>
-                                <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)] border-l-slate-400"><div>{rep}</div><div className="font-normal opacity-80">Qty</div></th>
-                                <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]"><div>{rep}</div><div className="font-normal opacity-80">Price (AED)</div></th>
-                            </React.Fragment>
-                        ))}
-                        <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg border-l-slate-400"><div>Total Forecast</div><div className="font-normal opacity-80">Qty</div></th>
-                        <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg"><div>Total Forecast</div><div className="font-normal opacity-80">Net Sales (AED)</div></th>
+                        
+                        <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg border-l-slate-400"><div>Total Forecast Qty</div></th>
+                        {visibleCols.confirmed_qty && (
+                            <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg"><div> Total Confirm Qty</div></th>
+                        )}
+                        <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg"><div>Total Net Sales (AED)</div></th>
                     </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                     {paginatedData.map((item: any, idx: number) => {
-                        const isFirstOfBPBlock = idx === 0 || item.lob_code !== paginatedData[idx - 1].lob_code;
-                        let bpRowSpan = 1;
-                        if (isFirstOfBPBlock) {
+                        const isFirstRep = idx === 0 || item.sales_rep_name !== paginatedData[idx - 1].sales_rep_name;
+                        const isFirstBp = isFirstRep || item.bp_name !== paginatedData[idx - 1].bp_name;
+                        const isFirstLob = isFirstBp || item.lob_name !== paginatedData[idx - 1].lob_name; // 1:1 with BP, shares boundary
+
+                        let repRowSpan = 1; let bpRowSpan = 1; let lobRowSpan = 1;
+                        
+                        if (isFirstRep) {
                             for (let i = idx + 1; i < paginatedData.length; i++) {
-                                if (paginatedData[i].lob_code === item.lob_code) bpRowSpan++;
-                                else break;
+                                if (paginatedData[i].sales_rep_name === item.sales_rep_name) repRowSpan++; else break;
+                            }
+                        }
+                        if (isFirstBp) {
+                            for (let i = idx + 1; i < paginatedData.length; i++) {
+                                if (paginatedData[i].sales_rep_name === item.sales_rep_name && paginatedData[i].bp_name === item.bp_name) {
+                                    bpRowSpan++;
+                                    lobRowSpan++; // Matches BP exactly
+                                } else break;
                             }
                         }
 
@@ -266,9 +309,9 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                             return (
                                 <tr key={item.unique_key} className="bg-slate-100/80 transition-colors border-y border-slate-300">
                                     <td className="border border-slate-200 px-3 py-2"></td>
-                                    {visibleCols.bpName && isFirstOfBPBlock && <td className="border border-slate-200 px-3 py-2"></td>}
+                                    {/* Subtotal row sits beneath the grouping */}
                                     <td colSpan={subtotalColSpan} className="border border-slate-200 px-3 py-2 text-right text-slate-700 font-bold uppercase tracking-wider">Total {item.product_category}</td>
-                                    {visibleCols.ln_price && <td className="border border-slate-200 px-3 py-2 text-right text-emerald-700">{item.ln_price.toFixed(2)}</td>}
+                                    {visibleCols.ln_price && <td className="border border-slate-200 px-3 py-2 text-right text-emerald-700">{item.ln_price > 0 ? item.ln_price.toFixed(2) : '-'}</td>}
                                     {visibleCols.cogs_price && (<td className="border border-slate-200 px-3 py-2 text-right text-rose-700"><div className="flex flex-col items-end"><span>{item.cogs_usd_value.toFixed(2)}</span><span className="text-slate-500">(AED {item.cogs_aed_value.toFixed(2)})</span></div></td>)}
                                     {visibleCols.cogs_currency && <td className="border border-slate-200 px-3 py-2 text-center text-slate-500">USD</td>}
                                     {visibleCols.kmi_qty && <td className="border border-slate-200 px-3 py-2 text-center text-slate-800">{item.kmi_qty}</td>}
@@ -277,17 +320,12 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                                     {visibleCols.avg12m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800">{item.avg_12m_sales.toFixed(1)}</td>}
                                     {visibleCols.avg6m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800">{item.avg_6m_sales.toFixed(1)}</td>}
                                     {visibleCols.avg3m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800">{item.avg_3m_sales.toFixed(1)}</td>}
-                                    {activeReps.map(rep => {
-                                        const repData = item.rep_subtotals[rep] || { qty: 0, netSales: 0 };
-                                        return (
-                                            <React.Fragment key={rep}>
-                                                <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-300 ${repData.qty > 0 ? 'bg-blue-100/60 text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.qty : '-'}</td>
-                                                <td className={`border border-slate-300 px-3 py-2 text-right ${repData.qty > 0 ? 'bg-blue-100/60 text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.netSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
-                                            </React.Fragment>
-                                        );
-                                    })}
-                                    <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-400 ${item.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-300'}`}>{item.forecast_qty > 0 ? item.forecast_qty : '-'}</td>
-                                    <td className={`border border-slate-300 px-3 py-2 text-right ${item.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-300'}`}>{item.forecast_qty > 0 ? item.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                    
+                                    <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-400 ${item.forecast_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{item.forecast_qty > 0 ? item.forecast_qty : '-'}</td>
+                                    {visibleCols.confirmed_qty && (
+                                        <td className={`border border-slate-300 px-3 py-2 text-center ${item.confirmed_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{item.confirmed_qty > 0 ? item.confirmed_qty : '-'}</td>
+                                    )}
+                                    <td className={`border border-slate-300 px-3 py-2 text-right ${item.forecast_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{item.forecast_qty > 0 ? item.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
                                 </tr>
                             );
                         }
@@ -298,7 +336,11 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                         return (
                             <tr key={item.unique_key} className="hover:bg-slate-50 transition-colors">
                                 <td className="border border-slate-200 px-3 py-2 text-center text-slate-500">{item.display_index}</td>
-                                {visibleCols.bpName && isFirstOfBPBlock && (<td rowSpan={bpRowSpan} className="border border-slate-200 px-3 py-2 text-blue-700 align-middle max-w-[200px] whitespace-normal leading-relaxed bg-white/50" title={item.lob_name}>{item.lob_name}</td>)}
+                                
+                                {visibleCols.salesRep && isFirstRep && (<td rowSpan={repRowSpan} className="border border-slate-200 px-3 py-2 text-slate-700 font-bold align-middle max-w-[150px] whitespace-normal leading-relaxed bg-slate-50" title={item.sales_rep_name}>{item.sales_rep_name}</td>)}
+                                {visibleCols.bpName && isFirstBp && (<td rowSpan={bpRowSpan} className="border border-slate-200 px-3 py-2 text-blue-700 font-bold align-middle max-w-[200px] whitespace-normal leading-relaxed bg-white" title={item.bp_name}>{item.bp_name}</td>)}
+                                {visibleCols.lobName && isFirstLob && (<td rowSpan={lobRowSpan} className="border border-slate-200 px-3 py-2 text-slate-600 font-medium align-middle max-w-[150px] whitespace-normal leading-relaxed bg-white" title={item.lob_name}>{item.lob_name}</td>)}
+
                                 {visibleCols.category && <td className="border border-slate-200 px-3 py-2 text-slate-700">{item.product_category}</td>}
                                 {visibleCols.line && <td className="border border-slate-200 px-3 py-2 text-slate-700">{item.product_line}</td>}
                                 {visibleCols.group && <td className="border border-slate-200 px-3 py-2 text-slate-700">{item.item_group}</td>}
@@ -318,18 +360,12 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                                 {visibleCols.total_qty && <td className="border border-slate-200 px-3 py-2 text-center text-slate-800 bg-slate-100/50">{item.total_qty || 0}</td>}
                                 {visibleCols.avg12m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-700 bg-blue-50/30">{Number(item.avg_12m_sales || 0).toFixed(1)}</td>}
                                 {visibleCols.avg6m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-700 bg-blue-50/30">{Number(item.avg_6m_sales || 0).toFixed(1)}</td>}
-                                {visibleCols.avg3m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800 bg-blue-100/20">{Number(item.avg_3m_sales || 0).toFixed(1)}</td>}
-                                {activeReps.map(rep => {
-                                    const repData = item.rep_data[rep] || { qty: 0, netSales: 0 };
-                                    return (
-                                        <React.Fragment key={rep}>
-                                            <td className={`border border-slate-200 px-3 py-2 text-center border-l-slate-300 ${repData.qty > 0 ? 'bg-blue-50 text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.qty : '-'}</td>
-                                            <td className={`border border-slate-200 px-3 py-2 text-right ${repData.qty > 0 ? 'bg-blue-50 text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.netSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
-                                        </React.Fragment>
-                                    );
-                                })}
-                                <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-400 ${item.forecast_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{item.forecast_qty > 0 ? item.forecast_qty : '-'}</td>
-                                <td className={`border border-slate-300 px-3 py-2 text-right ${item.forecast_qty > 0 ? 'bg-emerald-50 text-slate-900' : 'text-slate-300'}`}>{item.forecast_qty > 0 ? item.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                {visibleCols.avg3m && <td className="border border-slate-200 px-3 py-2 text-center text-blue-800 bg-blue-100/20">{Number(item.avg_3m_sales || 0).toFixed(1)}</td>}         
+                                <td className={`border border-slate-200 px-3 py-2 text-center border-l-slate-300 ${item.forecast_qty > 0 ? 'bg-blue-50 text-slate-900' : 'text-slate-300'}`}>{item.forecast_qty > 0 ? item.forecast_qty : '-'}</td>
+                                {visibleCols.confirmed_qty && (
+                                    <td className={`border border-slate-200 px-3 py-2 text-center ${item.confirmed_qty > 0 ? 'bg-emerald-50 text-emerald-900' : 'text-slate-300'}`}>{item.confirmed_qty > 0 ? item.confirmed_qty : '-'}</td>
+                                )}
+                                <td className={`border border-slate-200 px-3 py-2 text-right ${item.forecast_qty > 0 ? 'bg-blue-50 text-slate-900' : 'text-slate-300'}`}>{item.forecast_qty > 0 ? item.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
                             </tr>
                         );
                     })}
@@ -339,7 +375,7 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                 {bpSummaryData.length > 0 && (
                     <tfoot className="sticky bottom-0 z-20 shadow-[0_-1px_3px_rgba(0,0,0,0.05)] bg-slate-100 font-bold text-slate-700">
                         <tr>
-                            <td colSpan={subtotalColSpan + (visibleCols.bpName ? 1 : 0) + 1} className="px-4 py-3 text-right uppercase tracking-wider">Total (All Pages)</td>
+                            <td colSpan={subtotalColSpan + (visibleCols.salesRep ? 1 : 0) + (visibleCols.bpName ? 1 : 0) + (visibleCols.lobName ? 1 : 0) + 1} className="px-4 py-3 text-right uppercase tracking-wider">Total (All Pages)</td>
                             {visibleCols.ln_price && <td className="px-3 py-3 text-center border-l border-slate-200">-</td>}
                             {visibleCols.cogs_price && <td className="px-3 py-3 text-center">-</td>}
                             {visibleCols.cogs_currency && <td className="px-3 py-3 text-center">-</td>}
@@ -349,13 +385,11 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                             {visibleCols.avg12m && <td className="px-3 py-3 text-center">-</td>}
                             {visibleCols.avg6m && <td className="px-3 py-3 text-center">-</td>}
                             {visibleCols.avg3m && <td className="px-3 py-3 text-center">-</td>}
-                            {activeReps.map(rep => (
-                                <React.Fragment key={rep}>
-                                    <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-300 ${gridTotals.reps[rep].qty > 0 ? 'bg-blue-100/60 text-slate-900' : 'text-slate-400'}`}>{gridTotals.reps[rep].qty > 0 ? gridTotals.reps[rep].qty : '-'}</td>
-                                    <td className={`border border-slate-300 px-3 py-2 text-right ${gridTotals.reps[rep].qty > 0 ? 'bg-blue-100/60 text-slate-900' : 'text-slate-400'}`}>{gridTotals.reps[rep].qty > 0 ? gridTotals.reps[rep].netSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
-                                </React.Fragment>
-                            ))}
-                            <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-400 ${gridTotals.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.forecast_qty > 0 ? gridTotals.forecast_qty : '-'}</td>
+                            
+                            <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-300 ${gridTotals.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.forecast_qty > 0 ? gridTotals.forecast_qty : '-'}</td>
+                            {visibleCols.confirmed_qty && (
+                                <td className={`border border-slate-300 px-3 py-2 text-center ${gridTotals.confirmed_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.confirmed_qty > 0 ? gridTotals.confirmed_qty : '-'}</td>
+                            )}
                             <td className={`border border-slate-300 px-3 py-2 text-right ${gridTotals.forecast_qty > 0 ? 'bg-emerald-200/60 text-slate-900 shadow-inner' : 'text-slate-400'}`}>{gridTotals.forecast_qty > 0 ? gridTotals.net_sales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
                         </tr>
                     </tfoot>

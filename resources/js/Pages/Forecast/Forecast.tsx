@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Head, Link, usePage, router } from '@inertiajs/react';
-import { Database, LogOut, Search, Menu, FileEdit, PieChart, Building2, Loader2 } from 'lucide-react';
+import { Database, LogOut, Search, Menu, FileEdit, PieChart, Building2, Layers, Loader2 } from 'lucide-react'; // Added 'Layers' icon
 import SalesDataEntry from './Components/SalesDataEntry';
 import SummaryByItem from './Components/SummaryByItem';
 import SummaryByBP from './Components/SummaryByBP'; 
+import SummaryByLOB from './Components/SummaryByLOB'; 
 import FullDashboard from './Components/FullDashboard';
 import ActualSales from './Components/ActualSales';
 
@@ -18,7 +19,6 @@ const NavButton = ({ id, label, icon: Icon, activeTab, isSidebarOpen, onClick }:
   </button>
 );
 
-
 export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbBudgets, dbActualSales }: any) {
   const user = usePage().props.auth.user as any; 
 
@@ -27,10 +27,8 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
-  // check if the data already received from server 
   const isDataLoaded = dbProducts !== undefined && dbPricing !== undefined && dbEntries !== undefined;
 
-  // background request for heavy data 
   useEffect(() => {
       if (!isDataLoaded) {
           router.reload({
@@ -50,9 +48,7 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
       
       <aside className={`bg-slate-900 text-white flex flex-col shadow-xl transition-all duration-300 ease-in-out shrink-0 z-20 ${isSidebarOpen ? 'w-64' : 'w-20'}`} style={{ zoom: 0.80 }}>
         <div className={`p-6 border-b border-slate-800 flex items-center h-20 transition-all ${isSidebarOpen ? 'gap-3 justify-start' : 'px-0 justify-center'}`}>
-          
              <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-bold shadow-lg shrink-0 hover:bg-blue-500 transition-colors">K</div>
-
             {isSidebarOpen && (
                 <div className="whitespace-nowrap overflow-hidden">
                     <h1 className="font-bold text-lg tracking-tight">KME RSP</h1>
@@ -66,6 +62,9 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
           <NavButton id="data-entry" label="Sales Forecast" icon={FileEdit} activeTab={activeTab} isSidebarOpen={isSidebarOpen} onClick={handleTabChange} />
           <NavButton id="summary-item" label="Summary by Item" icon={Database} activeTab={activeTab} isSidebarOpen={isSidebarOpen} onClick={handleTabChange} />
           <NavButton id="summary-bp" label="Summary by BP" icon={Building2} activeTab={activeTab} isSidebarOpen={isSidebarOpen} onClick={handleTabChange} />
+          
+          {/* ADDED NEW LOB TAB HERE */}
+          <NavButton id="summary-lob" label="Summary by LOB" icon={Layers} activeTab={activeTab} isSidebarOpen={isSidebarOpen} onClick={handleTabChange} />
           
           {isSidebarOpen ? <div className="px-4 pb-2 pt-6 text-[10px] font-black text-slate-300 uppercase tracking-widest opacity-80 whitespace-nowrap">Analytics & Reports</div> : <div className="w-8 mx-auto border-t border-slate-700 my-4"></div>}
           
@@ -101,7 +100,8 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
                     <option value="2027">2027</option>
                 </select>
             )}
-            {(activeTab === 'summary-item' || activeTab === 'summary-bp') && (
+            {/* Added summary-lob to the search bar condition */}
+            {(activeTab === 'summary-item' || activeTab === 'summary-bp' || activeTab === 'summary-lob') && (
                 <div className="relative">
                   <Search className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                   <input type="text" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} placeholder="Search..." className="pl-10 pr-4 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 w-64 bg-slate-50" />
@@ -111,7 +111,6 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
         </header>
 
         <div className="flex-1 overflow-auto p-6" style={{ zoom: 0.80 }}>
-          {/* show the loading state */}
           {!isDataLoaded ? (
               <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
                   <Loader2 size={40} className="animate-spin text-blue-500" />
@@ -129,6 +128,11 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
                   <div className={activeTab === 'summary-bp' ? 'block h-full' : 'hidden'}>
                     <SummaryByBP dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
                   </div>
+                  
+                  <div className={activeTab === 'summary-lob' ? 'block h-full' : 'hidden'}>
+                    <SummaryByLOB dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
+                  </div>
+                  
                   <div className={activeTab === 'dashboard' ? 'block h-full' : 'hidden'}>
                     <FullDashboard dbLobs={dbLobs} dbProducts={dbProducts} dbEntries={dbEntries} dbActualSales={dbActualSales || []} dbPricing={dbPricing} user={user} />
                   </div>

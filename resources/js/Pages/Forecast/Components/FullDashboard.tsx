@@ -6,13 +6,17 @@ const CHART_COLORS = ['#ec4899', '#8b5cf6', '#4f46e5', '#3b82f6', '#0ea5e9', '#1
 export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEntries, dbActualSales = [], user }: any) {
   const [dashCurrency, setDashCurrency] = useState<'AED' | 'MYR' | 'USD'>('AED');
   
+  //default month format
+  const currentYear = new Date().getFullYear();
+  const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
+  const defaultMonth = `${currentYear}-${currentMonth}`;
+
   const [dashFilters, setDashFilters] = useState({
-      year: new Date().getFullYear().toString(), 
-      month: String(new Date().getMonth() + 1).padStart(2, '0'),
+      startMonth: defaultMonth, 
+      endMonth: defaultMonth,
       lob: 'All', salesPerson: user.role_id === 2 ? 'All' : user.employee_id, businessPartner: 'All',
       brand: 'All', productLine: 'All', productCategory: 'All', productGroup: 'All', productModel: 'All', itemCode: 'All'
   });
-
 
   const lobsById = useMemo(() => {
       const map = new Map();
@@ -36,7 +40,6 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
       return map;
   }, [dbLobs]);
 
-// dynamic dropdown (filtered only selected year and month) 
   const dashboardFilterOptions = useMemo(() => {
     const lobsMap = new Map<string, string>(); 
     const bps = new Set<string>(); const brands = new Set<string>();
@@ -47,53 +50,47 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
     const activeLobIds = new Set();
     const activeProductIds = new Set();
 
-    const isCoreFilterMatch = (y: string, m: string, repNo: string) => {
-        if (dashFilters.year !== 'All' && y !== dashFilters.year) return false;
-        if (dashFilters.month !== 'All' && m !== dashFilters.month) return false;
+    const isCoreFilterMatch = (dateStr: string, repNo: string) => {
+        if (!dateStr) return false;
+        const monthStr = dateStr.substring(0, 7); 
+        if (dashFilters.startMonth && monthStr < dashFilters.startMonth) return false;
+        if (dashFilters.endMonth && monthStr > dashFilters.endMonth) return false;
         if (dashFilters.salesPerson !== 'All' && repNo !== dashFilters.salesPerson) return false;
         return true;
     };
 
-    // scan Forecast Entries
     for (let i = 0; i < dbEntries.length; i++) {
         const entry = dbEntries[i];
-        const [y, m] = entry.planning_month.split('-');
         const lob = lobsById.get(Number(entry.lob_id));
         const repNo = String(lob?.sales_representative_no || 'Unknown').trim();
         
-        if (isCoreFilterMatch(y, m, repNo)) {
+        if (isCoreFilterMatch(entry.planning_month, repNo)) {
             activeLobIds.add(Number(entry.lob_id));
             activeProductIds.add(Number(entry.product_id));
         }
     }
 
-    // scan Actual Sales
     for (let i = 0; i < dbActualSales.length; i++) {
         const actual = dbActualSales[i];
-        const [y, m] = actual.invoice_date.split('-');
         const lob = lobsById.get(Number(actual.lob_id));
         const repNo = String(actual.sales_representative_no || lob?.sales_representative_no || 'Unknown').trim();
 
-        if (isCoreFilterMatch(y, m, repNo)) {
+        if (isCoreFilterMatch(actual.invoice_date, repNo)) {
             activeLobIds.add(Number(actual.lob_id));
             activeProductIds.add(Number(actual.product_id));
         }
     }
 
-    // populate LOB/BP dropdowns based on active data
     (dbLobs || []).forEach((lob: any) => {
         if (lob.sales_representative_no) {
             salesRepsMap.set(String(lob.sales_representative_no).trim(), String(lob.sales_rep_name || lob.sales_representative_no).trim());
         }
-        
-        // only populate LOB and BP if they have data in this month/year
         if (activeLobIds.has(Number(lob.lob_id))) {
             if (lob.lob_code) lobsMap.set(String(lob.lob_code).trim(), String(lob.lob_name || '').trim()); 
             if (lob.sold_to_bp_name) bps.add(String(lob.sold_to_bp_name).trim());
         }
     });
 
-    // populate Product dropdowns based on active data
     (dbProducts || []).forEach((prod: any) => {
         if (activeProductIds.has(Number(prod.product_id))) {
             if (prod.brand) brands.add(String(prod.brand).trim()); 
@@ -112,7 +109,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
         itemCodes: Array.from(itemCodes).sort(),
         salesReps: Array.from(salesRepsMap.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name))
     };
-  }, [dbEntries, dbActualSales, lobsById, dbLobs, dbProducts, dashFilters.year, dashFilters.month, dashFilters.salesPerson]);
+  }, [dbEntries, dbActualSales, lobsById, dbLobs, dbProducts, dashFilters.startMonth, dashFilters.endMonth, dashFilters.salesPerson]);
 
   const fullDashboardData = useMemo(() => {
     let forecastTotal = 0; let confirmedTotal = 0; let actualTotal = 0; let totalOnHand = 0;
@@ -123,9 +120,13 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
     const productLineChartGroups: Record<string, { lineName: string, forecast: number }> = {};
     const productModelGroups: Record<string, any> = {};
 
-    const passesFilters = (y: string, m: string, lobId: number, productId: number, repNo: string) => {
-        if (dashFilters.year !== 'All' && y !== dashFilters.year) return false;
-        if (dashFilters.month !== 'All' && m !== dashFilters.month) return false;
+    // check if date falls in range
+    const passesFilters = (dateStr: string, lobId: number, productId: number, repNo: string) => {
+        if (!dateStr) return false;
+        const monthStr = dateStr.substring(0, 7);
+        if (dashFilters.startMonth && monthStr < dashFilters.startMonth) return false;
+        if (dashFilters.endMonth && monthStr > dashFilters.endMonth) return false;
+        
         if (dashFilters.salesPerson !== 'All' && repNo !== dashFilters.salesPerson) return false;
         const lob = lobsById.get(lobId);
         if (dashFilters.lob !== 'All' && lob?.lob_code !== dashFilters.lob) return false;
@@ -153,11 +154,10 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
 
     for (let i = 0; i < dbEntries.length; i++) {
         const entry = dbEntries[i];
-        const [y, m] = entry.planning_month.split('-');
         const lob = lobsById.get(Number(entry.lob_id));
         const repNo = lob?.sales_representative_no || 'Unknown'; 
         
-        if (!passesFilters(y, m, entry.lob_id, entry.product_id, repNo)) continue;
+        if (!passesFilters(entry.planning_month, entry.lob_id, entry.product_id, repNo)) continue;
 
         uniqueProductIdsInView.add(entry.product_id);
         const bpName = lob?.sold_to_bp_name || lob?.sold_to_bp || 'Unknown';
@@ -166,19 +166,17 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
         
         const product = productsById.get(Number(entry.product_id));
         const pLine = product?.product_line || 'Unknown Line';
-        const pModel = product?.product_model || product?.item_code || 'Unknown Model';   
-        // forecast Calculation
+        const pModel = product?.product_model || product?.item_code || 'Unknown Model';
+        
         const convertedAmount = Number(entry.total_amount) * EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES];
         forecastTotal += convertedAmount;
 
-        // confirmed Revenue Calculation
         const plannedQty = Number(entry.planned_quantity || entry.quantities || entry.qty || 1);
         const priceAed = Number(entry.planned_price_aed) || (Number(entry.total_amount) / plannedQty);
         const confirmedAmountAed = Number(entry.confirmed_quantity || 0) * priceAed;
         const convertedConfirmedAmount = confirmedAmountAed * EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES];
         confirmedTotal += convertedConfirmedAmount;
 
-        // use rowKey so it has unique keys, NO double addition.
         const rowKey = `lob-${entry.lob_id}-rep-${salesRepName}`;
         if (!tableGroups[rowKey]) {
             tableGroups[rowKey] = { rowKey, bpName, lobName, salesRep: salesRepName, forecast: 0, confirmed: 0, actual: 0 };
@@ -186,7 +184,6 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
         tableGroups[rowKey].forecast += convertedAmount;
         tableGroups[rowKey].confirmed += convertedConfirmedAmount; 
 
-        // add confirmed revenue to the LobChartGroups
         if (!lobChartGroups[lobName]) lobChartGroups[lobName] = { lobName, forecast: 0, confirmed: 0, actual: 0 };
         lobChartGroups[lobName].forecast += convertedAmount;
         lobChartGroups[lobName].confirmed += convertedConfirmedAmount;
@@ -201,11 +198,10 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
 
     for (let i = 0; i < dbActualSales.length; i++) {
         const actual = dbActualSales[i];
-        const [y, m] = actual.invoice_date.split('-');
         const lob = lobsById.get(Number(actual.lob_id));
         const repNo = actual.sales_representative_no || lob?.sales_representative_no || 'Unknown';
 
-        if (!passesFilters(y, m, actual.lob_id, actual.product_id, repNo)) continue;
+        if (!passesFilters(actual.invoice_date, actual.lob_id, actual.product_id, repNo)) continue;
 
         uniqueProductIdsInView.add(actual.product_id);
         const bpName = lob?.sold_to_bp_name || lob?.sold_to_bp || 'Unknown';
@@ -218,7 +214,6 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
         const convertedAmount = Number(actual.sales) * EXCHANGE_RATES[dashCurrency as keyof typeof EXCHANGE_RATES];
         actualTotal += convertedAmount;
 
-        // use rowKey so it has unique keys, NO double addition.
         const rowKey = `lob-${actual.lob_id}-rep-${salesRepName}`;
         if (!tableGroups[rowKey]) {
             tableGroups[rowKey] = { rowKey, bpName, lobName, salesRep: salesRepName, forecast: 0, confirmed: 0, actual: 0 };
@@ -258,19 +253,14 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
     <div className="max-w-7xl mx-auto space-y-6 animate-in fade-in duration-300 pb-12">
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <div className="grid grid-cols-6 gap-4 items-end mb-4">
+                {/* DATE FILTERS */}
                 <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Year</label>
-                    <select value={dashFilters.year} onChange={(e) => setDashFilters({...dashFilters, year: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700"><option>All</option><option>2025</option><option>2026</option><option>2027</option></select>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">From Month</label>
+                    <input type="month" value={dashFilters.startMonth} onChange={(e) => setDashFilters({...dashFilters, startMonth: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 font-bold" />
                 </div>
                 <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Month</label>
-                    <select value={dashFilters.month} onChange={(e) => setDashFilters({...dashFilters, month: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700">
-                        <option value="All">All</option>
-                        <option value="01">Jan</option><option value="02">Feb</option><option value="03">Mar</option>
-                        <option value="04">Apr</option><option value="05">May</option><option value="06">Jun</option>
-                        <option value="07">Jul</option><option value="08">Aug</option><option value="09">Sep</option>
-                        <option value="10">Oct</option><option value="11">Nov</option><option value="12">Dec</option>
-                    </select>
+                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">To Month</label>
+                    <input type="month" value={dashFilters.endMonth} onChange={(e) => setDashFilters({...dashFilters, endMonth: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 font-bold" />
                 </div>
                 <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">LOB</label>
@@ -410,7 +400,6 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
                 </div>
             </div>
 
-            {/* inner scroll table  */}
             <div className="mt-8 border border-slate-200 rounded-lg overflow-auto max-h-[500px] relative">
                 <table className="w-full text-xs text-right whitespace-nowrap">
                     <thead className="bg-slate-100 text-slate-800 font-bold border-b border-slate-200 sticky top-0 z-20 shadow-sm">

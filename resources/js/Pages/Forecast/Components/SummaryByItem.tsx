@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import { Download, ArrowUpDown, ArrowUp, ArrowDown, Info } from 'lucide-react';
 
 // shared Utilities & Hooks
 import { USD_TO_AED_RATE, ITEMS_PER_PAGE } from '../Utils/constants';
@@ -181,11 +181,12 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
     const repHeaders = activeReps.flatMap(rep => {
         const cols = [`${rep} (Forecast Qty)`];
         if (visibleCols.confirmed_qty) cols.push(`${rep} (Confirm Qty)`);
-        cols.push(`${rep} (Price AED)`);
+        cols.push(`${rep} (Amount AED)`);
         return cols;
     });
 
-    const headers = ['No', 'Product Category', 'Product Line', 'Product Group', 'Product Model', 'Item Code', 'Item Description', 'Brand', 'LN Price (AED)', 'COGS Price', 'COGS Currency', 'KMI On Hand', 'KME On Hand', 'Total On Hand', '12M Avg (Sales)', '6M Avg (Sales)', '3M Avg (Sales)', ...repHeaders, ...adminHeaders];
+    // 'Weighted Avg Price (AED)'
+    const headers = ['No', 'Product Category', 'Product Line', 'Product Group', 'Product Model', 'Item Code', 'Item Description', 'Brand', 'Weighted Avg Price (AED)', 'COGS Price', 'COGS Currency', 'KMI On Hand', 'KME On Hand', 'Total On Hand', '12M Avg (Sales)', '6M Avg (Sales)', '3M Avg (Sales)', ...repHeaders, ...adminHeaders];
     
     const exportData = masterProducts.filter((prod: any) => !prod.isSubtotal);
     const rows = exportData.map((prod: any) => {
@@ -231,7 +232,7 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.description} onChange={() => toggleColumn('description')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />Item Description</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.brand} onChange={() => toggleColumn('brand')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />Brand</label>
                   <div className="border-t border-slate-100 my-1 pt-1"></div>
-                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-emerald-600"><input type="checkbox" checked={visibleCols.ln_price} onChange={() => toggleColumn('ln_price')} className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />LN Price (AED)</label>
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-emerald-600"><input type="checkbox" checked={visibleCols.ln_price} onChange={() => toggleColumn('ln_price')} className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />Weighted Avg Price (AED)</label>          
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-rose-600"><input type="checkbox" checked={visibleCols.cogs_price} onChange={() => toggleColumn('cogs_price')} className="rounded border-slate-300 text-rose-600 focus:ring-rose-500" />COGS Price</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-rose-600"><input type="checkbox" checked={visibleCols.cogs_currency} onChange={() => toggleColumn('cogs_currency')} className="rounded border-slate-300 text-rose-600 focus:ring-rose-500" />COGS Currency</label>
                   <div className="border-t border-slate-100 my-1 pt-1"></div>
@@ -271,7 +272,19 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                         )}
                         {visibleCols.description && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Item Description</th>}
                         {visibleCols.brand && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">Brand</th>}
-                        {visibleCols.ln_price && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold text-right">LN Price (AED)</th>}
+
+                        {visibleCols.ln_price && (
+                            <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold">
+                                <div 
+                                    className="flex items-center justify-end gap-1.5 cursor-help" 
+                                    title="Formula: (Total Net Sales / Total Forecast Qty)"
+                                >
+                                    Weighted Avg Price (AED)
+                                    <Info size={14} className="text-slate-500 hover:text-slate-700 transition-colors" />
+                                </div>
+                            </th>
+                        )}
+                        
                         {visibleCols.cogs_price && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold text-right">COGS Price</th>}
                         {visibleCols.cogs_currency && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold text-center">COGS Currency</th>}
                         {visibleCols.kmi_qty && <th className="border border-slate-300 bg-[#fce4d6] px-3 py-2 text-slate-800 font-bold text-center">KMI On Hand</th>}
@@ -286,11 +299,11 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                                 {visibleCols.confirmed_qty && (
                                     <th className="border border-slate-300 bg-emerald-100 px-3 py-2 text-emerald-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]"><div>{rep}</div><div className="font-normal opacity-80">Confirm Qty</div></th>
                                 )}
-                                <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]"><div>{rep}</div><div className="font-normal opacity-80">Price (AED)</div></th>
+                                <th className="border border-slate-300 bg-blue-100 px-3 py-2 text-blue-800 font-bold text-center shadow-[inset_2px_0_4px_-2px_rgba(0,0,0,0.05)]"><div>{rep}</div><div className="font-normal opacity-80">Amount (AED)</div></th>
                             </React.Fragment>
                         ))}
                         
-                        {/* HIDE IF NOT ADMIN */}
+                        {/* HIDE  IF NOT ADMIN */}
                         {isAdmin && (
                             <>
                                 <th className="border border-slate-300 bg-emerald-600 px-3 py-2 text-white font-bold text-center shadow-lg border-l-slate-400"><div>Total Forecast</div><div className="font-normal opacity-80">Qty</div></th>
@@ -322,11 +335,11 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                                         const repData = prod.rep_subtotals[rep] || { qty: 0, confirmedQty: 0, netSales: 0 };
                                         return (
                                             <React.Fragment key={rep}>
-                                                <td className={`border border-slate-300 bg-blue-100/60 px-3 py-2 text-center border-l-slate-300 ${repData.qty > 0 ? 'text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.qty : '-'}</td>
+                                                <td className={`border border-slate-300 px-3 py-2 text-center border-l-slate-300 ${repData.qty > 0 ? 'bg-blue-100/60 text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.qty : '-'}</td>
                                                 {visibleCols.confirmed_qty && (
-                                                    <td className={`border border-slate-300 bg-emerald-100/60 px-3 py-2 text-center ${repData.confirmedQty > 0 ? 'text-emerald-900' : 'text-slate-300'}`}>{repData.confirmedQty > 0 ? repData.confirmedQty : '-'}</td>
+                                                    <td className={`border border-slate-300 px-3 py-2 text-center ${repData.confirmedQty > 0 ? 'bg-emerald-100/60 text-emerald-900' : 'text-slate-300'}`}>{repData.confirmedQty > 0 ? repData.confirmedQty : '-'}</td>
                                                 )}
-                                                <td className={`border border-slate-300 bg-blue-100/60 px-3 py-2 text-right ${repData.qty > 0 ? 'text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.netSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
+                                                <td className={`border border-slate-300 px-3 py-2 text-right ${repData.qty > 0 ? 'bg-blue-100/60 text-slate-900' : 'text-slate-300'}`}>{repData.qty > 0 ? repData.netSales.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '-'}</td>
                                             </React.Fragment>
                                         );
                                     })}
@@ -344,9 +357,11 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                                 </tr>
                             );
                         }
+                        const isCogsUsd = (prod.cogs_currency || '').toUpperCase() === 'USD';
+                        const cogsPriceAed = isCogsUsd && prod.cogs_price ? (Number(prod.cogs_price) * USD_TO_AED_RATE).toFixed(2) : null;
 
                         return (
-                            <tr key={prod.product_id} className="hover:bg-slate-50 transition-colors">
+                            <tr key={prod.unique_key || prod.product_id} className="hover:bg-slate-50 transition-colors">
                                 <td className="border border-slate-200 px-3 py-2 text-center text-slate-500">{prod.display_index}</td>
                                 {visibleCols.category && <td className="border border-slate-200 px-3 py-2 text-slate-700">{prod.product_category}</td>}
                                 {visibleCols.line && <td className="border border-slate-200 px-3 py-2 text-slate-700">{prod.product_line}</td>}
@@ -358,7 +373,7 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                                 {visibleCols.ln_price && <td className={`border border-slate-200 px-3 py-2 text-right tracking-wider ${prod.ln_price > 0 ? 'text-emerald-600' : 'text-slate-300 italic'}`}>{prod.ln_price > 0 ? prod.ln_price.toFixed(2) : '#N/A'}</td>}
                                 {visibleCols.cogs_price && (
                                     <td className={`border border-slate-200 px-3 py-2 text-right tracking-wider ${prod.cogs_price ? 'text-rose-600' : 'text-slate-300 italic'}`}>
-                                        {prod.cogs_price ? (<div className="flex flex-col items-end"><span>{Number(prod.cogs_price).toFixed(2)}</span>{prod.is_cogs_usd && <span className="text-slate-400">(AED {prod.cogs_aed_value.toFixed(2)})</span>}</div>) : '#N/A'}
+                                        {prod.cogs_price ? (<div className="flex flex-col items-end"><span>{Number(prod.cogs_price).toFixed(2)}</span>{prod.is_cogs_usd && <span className="text-slate-400">(AED {cogsPriceAed})</span>}</div>) : '#N/A'}
                                     </td>
                                 )}
                                 {visibleCols.cogs_currency && <td className="border border-slate-200 px-3 py-2 text-center text-slate-600">{prod.cogs_currency || '-'}</td>}

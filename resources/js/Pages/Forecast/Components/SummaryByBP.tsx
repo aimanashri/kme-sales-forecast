@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Download, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Download, ArrowUpDown, ArrowUp, ArrowDown, Loader2 } from 'lucide-react';
+import { router } from '@inertiajs/react';
 
 // shared Utilities & Hooks
 import { USD_TO_AED_RATE, ITEMS_PER_PAGE } from '../Utils/constants';
@@ -20,20 +21,41 @@ const DEFAULT_COLS = {
 type SortColumn = 'lobName' | 'bpName' | 'itemCode' | 'category' | 'salesRep';
 type SortDirection = 'asc' | 'desc';
 
-export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, searchTerm, user }: any) {
+export default function SummaryByBP({ isActive, dbLobs, dbProducts, dbPricing, dbEntries, searchTerm, user }: any) {
   const [monthFilter, setMonthFilter] = useState(getNextMonthString());
+  const [isLoadingData, setIsLoadingData] = useState(false); 
   const [sortConfig, setSortConfig] = useState<{ key: SortColumn, direction: SortDirection }>({ key: 'salesRep', direction: 'asc' });
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
   const { visibleCols, toggleColumn } = useColumnVisibility('kmePlannerBPColumnPrefs', DEFAULT_COLS);
 
-  const isAdmin = user.role_id === 2;
+  const fetchedMonth = useRef<string | null>(null);
+
+  useEffect(() => {
+      if (!isActive) return;
+      const showSpinner = fetchedMonth.current !== monthFilter;
+      
+      if (showSpinner) {
+          setIsLoadingData(true);
+      }
+      router.reload({
+          only: ['dbProducts', 'dbPricing', 'dbEntries'],
+          data: { summary_month: monthFilter },
+          onFinish: () => {
+              if (showSpinner) {
+                  setIsLoadingData(false);
+                  fetchedMonth.current = monthFilter;
+              }
+          }
+      });
+  }, [isActive, monthFilter]); 
 
   const handleSort = (key: SortColumn) => {
       setSortConfig({ key, direction: sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc' });
   };
 
   const { bpStatsMap } = useMemo(() => {
+      if (!Array.isArray(dbEntries)) return { bpStatsMap: {} };
       const statsMap: Record<string, { totalQty: number, totalConfirmedQty: number, totalNetSales: number, lob_code: string, lob_name: string, rep_name: string, bp_name: string, product_id: number }> = {};
 
       dbEntries.forEach((entry: any) => {
@@ -67,6 +89,7 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
   }, [dbEntries, monthFilter, dbLobs]);
 
   const bpSummaryData = useMemo(() => {
+      if (!Array.isArray(dbProducts) || !Array.isArray(dbPricing)) return [];
       let activeData = Object.values(bpStatsMap).map((stat: any) => {
           const prod = dbProducts.find((p: any) => p.product_id === stat.product_id) || {};
           const matchingLobs = dbLobs.filter((l: any) => (l.sold_to_bp || l.lob_code) === stat.lob_code).map((l: any) => l.lob_id);
@@ -238,7 +261,13 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
               </button>
           </div>
         </div>
-        <div className="overflow-auto flex-1">
+    <div className="overflow-auto flex-1 relative">
+        {isLoadingData ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 gap-3 z-50">
+                <Loader2 size={30} className="animate-spin text-blue-500" />
+                <span className="text-sm font-medium">Aggregating Data for {monthFilter}...</span>
+            </div>
+        ) : (
             <table className="w-full text-[12px] text-left border-collapse whitespace-nowrap">
                 <thead className="sticky top-0 z-20 shadow-sm">
                     <tr>
@@ -395,6 +424,7 @@ export default function SummaryByBP({ dbLobs, dbProducts, dbPricing, dbEntries, 
                     </tfoot>
                 )}
             </table>
+        )}
         </div>
         
         <Pagination currentPage={currentPage} totalPages={totalPages} totalItems={bpSummaryData.length} itemsPerPage={ITEMS_PER_PAGE} onPrev={goToPrevPage} onNext={goToNextPage} />

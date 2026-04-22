@@ -15,7 +15,7 @@ use Inertia\Inertia;
 
 class ForecastController extends Controller
 {
-    public function index()
+    public function index(Request $request)
     {
         $user = Auth::user();
         $isAdmin = $user->role_id == 2;
@@ -44,6 +44,12 @@ class ForecastController extends Controller
 
         $allowedLobIds = $allowedLobs->pluck('lob_id');
 
+        // capture all data request from the frontend 
+        $requestedLobId = $request->input('lob_id');
+        $summaryMonth = $request->input('summary_month');
+        $startMonth = $request->input('start_month');
+        $endMonth = $request->input('end_month');
+
         return Inertia::render('Forecast/Forecast', [
             // pass immediately (lightweight)
             'dbLobs' => $allowedLobs, 
@@ -56,19 +62,45 @@ class ForecastController extends Controller
                 'avg_12m_sales', 'avg_6m_sales', 'avg_3m_sales'
             )->get()),
 
-            'dbPricing' => Inertia::lazy(fn() => ProductPrice::select('product_id', 'lob_id', 'price')->get()),
+            // fetch prices based on the tab's active request
+            'dbPricing' => Inertia::lazy(function () use ($requestedLobId, $summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
+                if ($requestedLobId) {
+                    return ProductPrice::where('lob_id', $requestedLobId)
+                        ->orWhereNull('lob_id')
+                        ->select('product_id', 'lob_id', 'price')
+                        ->get();
+                }
+            
+            if ($summaryMonth || ($startMonth && $endMonth)) {
+                $query = UserPlanning::query()->when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds));
+                
+                if ($summaryMonth) {
+                    $query->where('planning_month', $summaryMonth);
+                } else {
+                    $query->whereBetween('planning_month', [$startMonth, $endMonth]);
+                }
+                
+                $activeProductIds = $query->pluck('product_id')->unique();
+                return ProductPrice::whereIn('product_id', $activeProductIds)
+                    ->select('product_id', 'lob_id', 'price')
+                    ->get();
+            }
+            return [];
+        }),
 
-            'dbEntries' => Inertia::lazy(fn() => UserPlanning::when(!$isAdmin, function ($query) use ($allowedLobIds) {
-                $query->whereIn('lob_id', $allowedLobIds);
-            })->orderBy('created_at', 'desc')->get()),
+            // fetch entries based on the tab's active request
+            'dbEntries' => Inertia::lazy(function () use ($requestedLobId, $summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
+                $query = UserPlanning::query()->when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds));
+                
+                if ($requestedLobId) return $query->where('lob_id', $requestedLobId)->orderBy('created_at', 'desc')->get();
+                if ($summaryMonth) return $query->where('planning_month', $summaryMonth)->orderBy('created_at', 'desc')->get();
+                if ($startMonth && $endMonth) return $query->whereBetween('planning_month', [$startMonth, $endMonth])->orderBy('created_at', 'desc')->get();
+                
+                return [];
+            }),
 
-            'dbBudgets' => Inertia::lazy(fn() => CategoryBudget::when(!$isAdmin, function ($query) use ($user) {
-                $query->where('user_id', $user->user_id);
-            })->get()),
-
-            'dbActualSales' => Inertia::lazy(fn() => ActualSale::when(!$isAdmin, function ($query) use ($user) {
-                $query->where('sales_representative_no', $user->employee_id);
-            })->get()),
+            'dbBudgets' => Inertia::lazy(fn() => CategoryBudget::when(!$isAdmin, fn($q) => $q->where('user_id', $user->user_id))->get()),
+            'dbActualSales' => Inertia::lazy(fn() => ActualSale::when(!$isAdmin, fn($q) => $q->where('sales_representative_no', $user->employee_id))->get()),
         ]);
     }
 

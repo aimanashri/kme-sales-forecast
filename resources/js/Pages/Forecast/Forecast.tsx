@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Head, Link, usePage, router } from '@inertiajs/react';
-import { Database, LogOut, Search, Menu, FileEdit, PieChart, Building2, Layers, Loader2 } from 'lucide-react'; // Added 'Layers' icon
+import { Database, LogOut, Search, Menu, FileEdit, PieChart, Building2, Layers, Loader2 } from 'lucide-react';
 import SalesDataEntry from './Components/SalesDataEntry';
 import SummaryByItem from './Components/SummaryByItem';
 import SummaryByBP from './Components/SummaryByBP'; 
@@ -27,15 +27,6 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 
-  const isDataLoaded = dbProducts !== undefined && dbPricing !== undefined && dbEntries !== undefined;
-
-  useEffect(() => {
-      if (!isDataLoaded) {
-          router.reload({
-              only: ['dbProducts', 'dbPricing', 'dbEntries', 'dbBudgets', 'dbActualSales'],
-          });
-      }
-  }, [isDataLoaded]);
 
   const handleTabChange = (id: string) => {
       setActiveTab(id);
@@ -111,36 +102,28 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
         </header>
 
         <div className="flex-1 overflow-auto p-6" style={{ zoom: 0.80 }}>
-          {!isDataLoaded ? (
-              <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-4">
-                  <Loader2 size={40} className="animate-spin text-blue-500" />
-                  <p className="font-medium text-lg">Loading forecast database...</p>
-                  <p className="text-xs">Preparing products, pricing, and entries</p>
-              </div>
-          ) : (
-              <>
+          <>
                   <div className={activeTab === 'data-entry' ? 'block h-full' : 'hidden'}>
-                    <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} />
+                    <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricing || []} dbEntries={dbEntries || []} />
                   </div>
                   <div className={activeTab === 'summary-item' ? 'block h-full' : 'hidden'}>
-                    <SummaryByItem dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
+                    <SummaryByItem isActive={activeTab === 'summary-item'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricing || []} dbEntries={dbEntries || []} searchTerm={searchTerm} user={user} />
                   </div>
                   <div className={activeTab === 'summary-bp' ? 'block h-full' : 'hidden'}>
-                    <SummaryByBP dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
+                    <SummaryByBP isActive={activeTab === 'summary-bp'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricing || []} dbEntries={dbEntries || []} searchTerm={searchTerm} user={user} />
                   </div>
                   
                   <div className={activeTab === 'summary-lob' ? 'block h-full' : 'hidden'}>
-                    <SummaryByLOB dbLobs={dbLobs} dbProducts={dbProducts} dbPricing={dbPricing} dbEntries={dbEntries} searchTerm={searchTerm} user={user} />
+                    <SummaryByLOB isActive={activeTab === 'summary-lob'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricing || []} dbEntries={dbEntries || []} searchTerm={searchTerm} user={user} />
                   </div>
                   
                   <div className={activeTab === 'dashboard' ? 'block h-full' : 'hidden'}>
-                    <FullDashboard dbLobs={dbLobs} dbProducts={dbProducts} dbEntries={dbEntries} dbActualSales={dbActualSales || []} dbPricing={dbPricing} user={user} />
+                    <FullDashboard isActive={activeTab === 'dashboard'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbEntries={dbEntries || []} dbActualSales={dbActualSales || []} dbPricing={dbPricing || []} user={user} />
                   </div>
                   <div className={activeTab === 'actual-sales' ? 'block h-full' : 'hidden'}>
-                    <ActualSales dbProducts={dbProducts} dbEntries={dbEntries} dbBudgets={dbBudgets || []} selectedYear={selectedYear} user={user} />
+                    <ActualSales dbProducts={dbProducts || []} dbEntries={dbEntries || []} dbBudgets={dbBudgets || []} selectedYear={selectedYear} user={user} />
                   </div>
               </>
-          )}
         </div>
       </main>
     </div>

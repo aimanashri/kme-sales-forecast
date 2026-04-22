@@ -1,12 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect,useRef } from 'react';
+import { router } from '@inertiajs/react';
+import { Loader2 } from 'lucide-react';
 import { EXCHANGE_RATES } from '../Utils/constants';
 
 const CHART_COLORS = ['#ec4899', '#8b5cf6', '#4f46e5', '#3b82f6', '#0ea5e9', '#10b981', '#f59e0b', '#f97316', '#ef4444', '#14b8a6'];
 
-export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEntries, dbActualSales = [], user }: any) {
+export default function FullDashboard({ isActive, dbLobs, dbProducts, dbPricing = [], dbEntries, dbActualSales = [], user }: any) {
   const [dashCurrency, setDashCurrency] = useState<'AED' | 'MYR' | 'USD'>('AED');
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const fetchedRange = useRef<string | null>(null);
   
-  //default month format
   const currentYear = new Date().getFullYear();
   const currentMonth = String(new Date().getMonth() + 1).padStart(2, '0');
   const defaultMonth = `${currentYear}-${currentMonth}`;
@@ -17,6 +20,31 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
       lob: 'All', salesPerson: user.role_id === 2 ? 'All' : user.employee_id, businessPartner: 'All',
       brand: 'All', productLine: 'All', productCategory: 'All', productGroup: 'All', productModel: 'All', itemCode: 'All'
   });
+
+  useEffect(() => {
+      if (!isActive) return;
+
+      const currentRange = `${dashFilters.startMonth}_${dashFilters.endMonth}`;
+      //only show spinner if date range changed
+      const showSpinner = fetchedRange.current !== currentRange;
+
+      if (showSpinner) {
+          setIsLoadingData(true);
+      }
+      router.reload({
+          only: ['dbProducts', 'dbPricing', 'dbEntries', 'dbActualSales'],
+          data: { 
+              start_month: dashFilters.startMonth, 
+              end_month: dashFilters.endMonth 
+          },
+          onFinish: () => {
+              if (showSpinner) {
+                  setIsLoadingData(false);
+                  fetchedRange.current = currentRange;
+              }
+          }
+      });
+  }, [dashFilters.startMonth, dashFilters.endMonth, isActive]);
 
   const lobsById = useMemo(() => {
       const map = new Map();
@@ -59,7 +87,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
         return true;
     };
 
-    for (let i = 0; i < dbEntries.length; i++) {
+    for (let i = 0; i < (dbEntries || []).length; i++) {
         const entry = dbEntries[i];
         const lob = lobsById.get(Number(entry.lob_id));
         const repNo = String(lob?.sales_representative_no || 'Unknown').trim();
@@ -70,7 +98,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
         }
     }
 
-    for (let i = 0; i < dbActualSales.length; i++) {
+    for (let i = 0; i < (dbActualSales || []).length; i++) {
         const actual = dbActualSales[i];
         const lob = lobsById.get(Number(actual.lob_id));
         const repNo = String(actual.sales_representative_no || lob?.sales_representative_no || 'Unknown').trim();
@@ -152,7 +180,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
         }
     };
 
-    for (let i = 0; i < dbEntries.length; i++) {
+    for (let i = 0; i < (dbEntries || []).length; i++) {
         const entry = dbEntries[i];
         const lob = lobsById.get(Number(entry.lob_id));
         const repNo = lob?.sales_representative_no || 'Unknown'; 
@@ -196,7 +224,7 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
         productModelGroups[pModel].forecastAmount += convertedAmount;
     }
 
-    for (let i = 0; i < dbActualSales.length; i++) {
+    for (let i = 0; i < (dbActualSales || []).length; i++) {
         const actual = dbActualSales[i];
         const lob = lobsById.get(Number(actual.lob_id));
         const repNo = actual.sales_representative_no || lob?.sales_representative_no || 'Unknown';
@@ -255,23 +283,29 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
             <div className="grid grid-cols-6 gap-4 items-end mb-4">
                 {/* DATE FILTERS */}
                 <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">From Month</label>
-                    <input type="month" value={dashFilters.startMonth} onChange={(e) => setDashFilters({...dashFilters, startMonth: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 font-bold" />
+                    <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                        From Month
+                        {isLoadingData && <Loader2 size={12} className="animate-spin text-blue-500" />}
+                    </label>
+                    <input type="month" disabled={isLoadingData} value={dashFilters.startMonth} onChange={(e) => setDashFilters({...dashFilters, startMonth: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 font-bold disabled:opacity-50" />
                 </div>
                 <div>
-                    <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">To Month</label>
-                    <input type="month" value={dashFilters.endMonth} onChange={(e) => setDashFilters({...dashFilters, endMonth: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 font-bold" />
+                    <label className="flex items-center gap-2 text-[10px] font-bold text-slate-500 mb-1 uppercase">
+                        To Month
+                        {isLoadingData && <Loader2 size={12} className="animate-spin text-blue-500" />}
+                    </label>
+                    <input type="month" disabled={isLoadingData} value={dashFilters.endMonth} onChange={(e) => setDashFilters({...dashFilters, endMonth: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 font-bold disabled:opacity-50" />
                 </div>
                 <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">LOB</label>
-                    <select value={dashFilters.lob} onChange={(e) => setDashFilters({...dashFilters, lob: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700">
+                    <select disabled={isLoadingData} value={dashFilters.lob} onChange={(e) => setDashFilters({...dashFilters, lob: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 disabled:opacity-50">
                         <option value="All">All</option>{dashboardFilterOptions.lobs.map((l: any) => <option key={l.code} value={l.code}>{l.code} {l.name ? `- ${l.name}` : ''}</option>)}
                     </select>
                 </div>
                 
                <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Sales Rep Name</label>
-                    <select disabled={user.role_id !== 2} value={dashFilters.salesPerson} onChange={(e) => setDashFilters({...dashFilters, salesPerson: e.target.value})} className={`w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 ${user.role_id !== 2 ? 'bg-slate-50 font-bold cursor-not-allowed' : ''}`}>
+                    <select disabled={user.role_id !== 2 || isLoadingData} value={dashFilters.salesPerson} onChange={(e) => setDashFilters({...dashFilters, salesPerson: e.target.value})} className={`w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 ${user.role_id !== 2 || isLoadingData ? 'bg-slate-50 font-bold cursor-not-allowed opacity-50' : ''}`}>
                         {user.role_id === 2 && <option value="All">All Reps</option>}
                         {user.role_id !== 2 && <option value={user.employee_id}>{user.full_name}</option>}
                         {user.role_id === 2 && dashboardFilterOptions.salesReps.map((rep: any) => <option key={rep.id} value={rep.id}>{rep.name}</option>)}
@@ -280,19 +314,19 @@ export default function FullDashboard({ dbLobs, dbProducts, dbPricing = [], dbEn
 
                 <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase truncate">Business Partner</label>
-                    <select value={dashFilters.businessPartner} onChange={(e) => setDashFilters({...dashFilters, businessPartner: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700"><option>All</option>{dashboardFilterOptions.bps.map(bp => <option key={bp}>{bp}</option>)}</select>
+                    <select disabled={isLoadingData} value={dashFilters.businessPartner} onChange={(e) => setDashFilters({...dashFilters, businessPartner: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 disabled:opacity-50"><option>All</option>{dashboardFilterOptions.bps.map(bp => <option key={bp}>{bp}</option>)}</select>
                 </div>
                 <div>
                     <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Brand</label>
-                    <select value={dashFilters.brand} onChange={(e) => setDashFilters({...dashFilters, brand: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700"><option>All</option>{dashboardFilterOptions.brands.map(b => <option key={b}>{b}</option>)}</select>
+                    <select disabled={isLoadingData} value={dashFilters.brand} onChange={(e) => setDashFilters({...dashFilters, brand: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 disabled:opacity-50"><option>All</option>{dashboardFilterOptions.brands.map(b => <option key={b}>{b}</option>)}</select>
                 </div>
             </div>
             <div className="grid grid-cols-5 gap-4 items-end">
-                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Product Line</label><select value={dashFilters.productLine} onChange={(e) => setDashFilters({...dashFilters, productLine: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700"><option>All</option>{dashboardFilterOptions.pLines.map(l => <option key={l}>{l}</option>)}</select></div>
-                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Product Category</label><select value={dashFilters.productCategory} onChange={(e) => setDashFilters({...dashFilters, productCategory: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700"><option>All</option>{dashboardFilterOptions.pCats.map(c => <option key={c}>{c}</option>)}</select></div>
-                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Product Group</label><select value={dashFilters.productGroup} onChange={(e) => setDashFilters({...dashFilters, productGroup: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700"><option>All</option>{dashboardFilterOptions.pGroups.map(g => <option key={g}>{g}</option>)}</select></div>
-                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Product Model</label><select value={dashFilters.productModel} onChange={(e) => setDashFilters({...dashFilters, productModel: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700"><option>All</option>{dashboardFilterOptions.pModels.map(m => <option key={m}>{m}</option>)}</select></div>
-                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Item Code</label><select value={dashFilters.itemCode} onChange={(e) => setDashFilters({...dashFilters, itemCode: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700"><option>All</option>{dashboardFilterOptions.itemCodes.map(i => <option key={i}>{i}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Product Line</label><select disabled={isLoadingData} value={dashFilters.productLine} onChange={(e) => setDashFilters({...dashFilters, productLine: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 disabled:opacity-50"><option>All</option>{dashboardFilterOptions.pLines.map(l => <option key={l}>{l}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Product Category</label><select disabled={isLoadingData} value={dashFilters.productCategory} onChange={(e) => setDashFilters({...dashFilters, productCategory: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 disabled:opacity-50"><option>All</option>{dashboardFilterOptions.pCats.map(c => <option key={c}>{c}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Product Group</label><select disabled={isLoadingData} value={dashFilters.productGroup} onChange={(e) => setDashFilters({...dashFilters, productGroup: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 disabled:opacity-50"><option>All</option>{dashboardFilterOptions.pGroups.map(g => <option key={g}>{g}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Product Model</label><select disabled={isLoadingData} value={dashFilters.productModel} onChange={(e) => setDashFilters({...dashFilters, productModel: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 disabled:opacity-50"><option>All</option>{dashboardFilterOptions.pModels.map(m => <option key={m}>{m}</option>)}</select></div>
+                <div><label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Item Code</label><select disabled={isLoadingData} value={dashFilters.itemCode} onChange={(e) => setDashFilters({...dashFilters, itemCode: e.target.value})} className="w-full text-xs border-slate-200 rounded py-1.5 focus:ring-blue-500 text-slate-700 disabled:opacity-50"><option>All</option>{dashboardFilterOptions.itemCodes.map(i => <option key={i}>{i}</option>)}</select></div>
             </div>
         </div>
 

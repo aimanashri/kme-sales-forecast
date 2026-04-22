@@ -1,5 +1,6 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { Download, ArrowUpDown, ArrowUp, ArrowDown, Info } from 'lucide-react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { Download, ArrowUpDown, ArrowUp, ArrowDown, Info, Loader2 } from 'lucide-react';
+import { router } from '@inertiajs/react';
 
 // shared Utilities & Hooks
 import { USD_TO_AED_RATE, ITEMS_PER_PAGE } from '../Utils/constants';
@@ -20,20 +21,41 @@ const DEFAULT_COLS = {
 type SortColumn = 'itemCode' | 'category';
 type SortDirection = 'asc' | 'desc';
 
-export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries, searchTerm, user }: any) {
+export default function SummaryByItem({ isActive, dbLobs, dbProducts, dbPricing, dbEntries, searchTerm, user }: any) {
   const [masterMonthFilter, setMasterMonthFilter] = useState(getNextMonthString());
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const fetchedMonth = useRef<string | null>(null);
   const [sortConfig, setSortConfig] = useState<{ key: SortColumn, direction: SortDirection }>({ key: 'category', direction: 'asc' });
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
   const { visibleCols, toggleColumn } = useColumnVisibility('kmePlannerMasterColumnPrefs', DEFAULT_COLS);
 
-  // check if current user is an admin
   const isAdmin = user.role_id === 2;
+
+ useEffect(() => {
+      if (!isActive) return;
+      const showSpinner = fetchedMonth.current !== masterMonthFilter;
+      
+      if (showSpinner) {
+          setIsLoadingData(true);
+      }
+      router.reload({
+          only: ['dbProducts', 'dbPricing', 'dbEntries'],
+          data: { summary_month: masterMonthFilter },
+          onFinish: () => {
+              if (showSpinner) {
+                  setIsLoadingData(false);
+                  fetchedMonth.current = masterMonthFilter; // mark this month as loaded
+              }
+          }
+      });
+  }, [isActive, masterMonthFilter]);
 
   const handleSort = (key: SortColumn) => {
       setSortConfig({ key, direction: sortConfig.key === key && sortConfig.direction === 'asc' ? 'desc' : 'asc' });
   };
 
   const activeReps = useMemo(() => {
+      if (!Array.isArray(dbEntries)) return [];
       const reps = new Set<string>();
       dbEntries.forEach((e: any) => {
           if (e.planning_month === masterMonthFilter && Number(e.planned_quantity) > 0) {
@@ -45,6 +67,7 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
   }, [dbEntries, masterMonthFilter, dbLobs]);
 
   const forecastStatsMap = useMemo(() => {
+    if (!Array.isArray(dbEntries)) return {};
     const map: Record<number, { totalQty: number, totalConfirmedQty: number, totalNetSales: number, reps: Record<string, { qty: number, confirmedQty: number, netSales: number }> }> = {};
     dbEntries.forEach((entry: any) => {
         if (entry.planning_month === masterMonthFilter && Number(entry.planned_quantity) > 0) {
@@ -71,6 +94,7 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
   }, [dbEntries, masterMonthFilter, dbLobs]);
 
   const masterProducts = useMemo(() => {
+      if (!Array.isArray(dbProducts) || !Array.isArray(dbPricing)) return [];
       let activeProducts = dbProducts.filter((p: any) => forecastStatsMap[p.product_id] !== undefined);
       activeProducts = activeProducts.map((prod: any) => {
           const stats = forecastStatsMap[prod.product_id];
@@ -232,7 +256,7 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.description} onChange={() => toggleColumn('description')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />Item Description</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-blue-600"><input type="checkbox" checked={visibleCols.brand} onChange={() => toggleColumn('brand')} className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />Brand</label>
                   <div className="border-t border-slate-100 my-1 pt-1"></div>
-                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-emerald-600"><input type="checkbox" checked={visibleCols.ln_price} onChange={() => toggleColumn('ln_price')} className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />Weighted Avg Price (AED)</label>          
+                  <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-emerald-600"><input type="checkbox" checked={visibleCols.ln_price} onChange={() => toggleColumn('ln_price')} className="rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />Weighted Avg Price (AED)</label>         
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-rose-600"><input type="checkbox" checked={visibleCols.cogs_price} onChange={() => toggleColumn('cogs_price')} className="rounded border-slate-300 text-rose-600 focus:ring-rose-500" />COGS Price</label>
                   <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer hover:text-rose-600"><input type="checkbox" checked={visibleCols.cogs_currency} onChange={() => toggleColumn('cogs_currency')} className="rounded border-slate-300 text-rose-600 focus:ring-rose-500" />COGS Currency</label>
                   <div className="border-t border-slate-100 my-1 pt-1"></div>
@@ -252,7 +276,13 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
               </button>
           </div>
         </div>
-        <div className="overflow-auto flex-1">
+        <div className="overflow-auto flex-1 relative">
+            {isLoadingData ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 gap-3 z-50">
+                    <Loader2 size={30} className="animate-spin text-blue-500" />
+                    <span className="text-sm font-medium">Aggregating Data for {masterMonthFilter}...</span>
+                </div>
+            ) : (
             <table className="w-full text-[12px] text-left border-collapse whitespace-nowrap">
                 <thead className="sticky top-0 z-20 shadow-sm">
                     <tr>
@@ -449,6 +479,7 @@ export default function SummaryByItem({ dbLobs, dbProducts, dbPricing, dbEntries
                     </tfoot>
                 )}
             </table>
+        )}
         </div>
         
         <Pagination currentPage={currentPage} totalPages={totalPages} totalItems={masterProducts.filter(p => !p.isSubtotal).length} itemsPerPage={ITEMS_PER_PAGE} onPrev={goToPrevPage} onNext={goToNextPage} />

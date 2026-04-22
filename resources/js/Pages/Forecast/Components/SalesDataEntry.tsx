@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { router, usePage } from '@inertiajs/react'; 
 import Select from 'react-select'; 
-import { Save, CheckCircle2, Download, Search } from 'lucide-react';
+import { Save, CheckCircle2, Download, Search, Loader2 } from 'lucide-react';
 
 // shared  Utilities & Hooks
 import { EXCHANGE_RATES, USD_TO_AED_RATE } from '../Utils/constants';
@@ -25,6 +25,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
   const user = usePage().props.auth.user as any; 
 
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingData, setIsLoadingData] = useState(false); // track loading state
   const [notification, setNotification] = useState<string | null>(null);
   
   const [selectedLob, setSelectedLob] = useState<number | null>(null);
@@ -55,23 +56,29 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
   const currentLobName = useMemo(() => dbLobs.find((l: any) => l.lob_id === selectedLob)?.lob_name || '-', [dbLobs, selectedLob]);
 
   const baseGridProducts = useMemo(() => {
-      if (!selectedLob) return [];
+      if (!selectedLob || dbProducts.length === 0) return [];
       const prevMonthString = getPreviousMonthString(planningMonth);
       const priceMap = new Map();
-      dbPricing.forEach((p: any) => {
-          if (p.lob_id === selectedLob) priceMap.set(p.product_id, p.price);
-          else if (p.lob_id === null && !priceMap.has(p.product_id)) priceMap.set(p.product_id, p.price);
-      });
+      
+      // makesure dbPricing is an array before iterating
+      if (Array.isArray(dbPricing)) {
+          dbPricing.forEach((p: any) => {
+              if (p.lob_id === selectedLob) priceMap.set(p.product_id, p.price);
+              else if (p.lob_id === null && !priceMap.has(p.product_id)) priceMap.set(p.product_id, p.price);
+          });
+      }
 
       const currentMonthEntries = new Map();
       const prevMonthEntries = new Map();
       
-      dbEntries.forEach((e: any) => {
-          if (e.lob_id === selectedLob) {
-              if (e.planning_month === planningMonth) currentMonthEntries.set(e.product_id, e);
-              if (e.planning_month === prevMonthString) prevMonthEntries.set(e.product_id, e);
-          }
-      });
+      if (Array.isArray(dbEntries)) {
+          dbEntries.forEach((e: any) => {
+              if (e.lob_id === selectedLob) {
+                  if (e.planning_month === planningMonth) currentMonthEntries.set(e.product_id, e);
+                  if (e.planning_month === prevMonthString) prevMonthEntries.set(e.product_id, e);
+              }
+          });
+      }
 
       const validIds = new Set([...currentMonthEntries.keys(), ...priceMap.keys()]);
       const list = dbProducts.filter((p: any) => validIds.has(p.product_id));
@@ -114,7 +121,10 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
       setCurrentPage(1);
   }, [selectedLob, productSearchInput, setCurrentPage]);
 
-  const filteredEntries = useMemo(() => dbEntries.filter((entry: any) => entry.planning_month === recentMonthFilter), [dbEntries, recentMonthFilter]);
+  const filteredEntries = useMemo(() => {
+      if (!Array.isArray(dbEntries)) return [];
+      return dbEntries.filter((entry: any) => entry.planning_month === recentMonthFilter);
+  }, [dbEntries, recentMonthFilter]);
 
   const handleEdit = (productId: number, field: 'qty' | 'planPrice' | 'confirmedQty', value: any) => {
       setEdits(prev => {
@@ -198,10 +208,16 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
 
       setIsSaving(true);
       router.post(route('forecast.store'), { entries: payloadEntries }, {
-          preserveScroll: true, preserveState: true, only: ['dbEntries', 'errors'], 
+          preserveScroll: true,
           onSuccess: () => {
               showNotification(`Saved ${payloadEntries.length} entries successfully!`);
-              setEdits({}); setRecentMonthFilter(planningMonth); setIsSaving(false);
+              setEdits({}); 
+              setRecentMonthFilter(planningMonth); 
+              router.reload({
+                  only: ['dbEntries'],
+                  data: { lob_id: selectedLob },
+                  onFinish: () => setIsSaving(false)
+              });
           },
           onError: () => { showNotification('Error saving entries.'); setIsSaving(false); }
       });
@@ -239,7 +255,23 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
           <div className="flex flex-wrap items-end gap-6">
               <div className="w-96 flex-shrink-0">
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Sold to BP</label>
-                  <Select isClearable options={lobOptions} menuPortalTarget={document.body} styles={customSelectStyles} value={lobOptions.find((opt:any) => opt.value === selectedLob) || null} placeholder="Search BP Code or Name..." onInputChange={(val, a) => { if (a.action === 'input-change') setLobSearchInput(val); }} onChange={(opt: any) => { setSelectedLob(opt ? opt.value : null); setEdits({}); setProductSearchInput(''); }} />
+                  <Select isClearable options={lobOptions} menuPortalTarget={document.body} styles={customSelectStyles} value={lobOptions.find((opt:any) => opt.value === selectedLob) || null} placeholder="Search BP Code or Name..." onInputChange={(val, a) => { if (a.action === 'input-change') setLobSearchInput(val); }} onChange={(opt: any) => { 
+                        const newLobId = opt ? opt.value : null;
+                        setSelectedLob(newLobId); 
+                        setEdits({}); 
+                        setProductSearchInput(''); 
+                        
+                        // ask backend for just this LOB's data
+                        if (newLobId) {
+                            setIsLoadingData(true);
+                            router.reload({
+                                only: ['dbProducts', 'dbPricing', 'dbEntries'],
+                                data: { lob_id: newLobId }, // Pass the selected LOB
+                                onFinish: () => setIsLoadingData(false) // preserveState and preserveScroll are true by default!
+                            });
+                        }
+                    }} 
+                  />
               </div>
               <div className="w-48">
                   <label className="block text-[10px] font-bold text-slate-500 mb-1 uppercase">Forecast Month</label>
@@ -258,7 +290,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
               
               <div className="flex-1"></div>
               
-              <button onClick={handleSaveAll} disabled={pendingSavesCount === 0 || isSaving} className="bg-blue-600 text-white h-[36px] px-6 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:bg-slate-300 flex items-center justify-center gap-2 transition-all shadow-sm whitespace-nowrap">
+              <button onClick={handleSaveAll} disabled={pendingSavesCount === 0 || isSaving || isLoadingData} className="bg-blue-600 text-white h-[36px] px-6 rounded-lg font-bold text-sm hover:bg-blue-700 disabled:bg-slate-300 flex items-center justify-center gap-2 transition-all shadow-sm whitespace-nowrap">
                   <Save size={16} /> {isSaving ? 'Saving...' : `Save ${pendingSavesCount} Updates`}
               </button>
           </div>
@@ -270,16 +302,22 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
               <div className="flex items-center gap-3">
                   <div className="w-3 h-3 rounded-full bg-blue-500"></div>
                   <span className="text-xs font-bold text-slate-600 uppercase tracking-widest">Mass Entry {filteredGridProducts.length > 0 && `(${filteredGridProducts.length} Products)`}</span>
+                  {isLoadingData && <Loader2 size={14} className="animate-spin text-blue-500 ml-2" />}
               </div>
               <div className="relative">
                   <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                  <input type="text" placeholder="Filter product based on BP..." value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} disabled={!selectedLob} className="pl-9 pr-4 py-1.5 border border-slate-300 rounded-full text-xs focus:ring-blue-500 w-64 shadow-inner disabled:bg-slate-100" />
+                  <input type="text" placeholder="Filter product based on BP..." value={productSearchInput} onChange={(e) => setProductSearchInput(e.target.value)} disabled={!selectedLob || isLoadingData} className="pl-9 pr-4 py-1.5 border border-slate-300 rounded-full text-xs focus:ring-blue-500 w-64 shadow-inner disabled:bg-slate-100" />
               </div>
           </div>
           
           <div className="overflow-auto flex-1 relative">
             {!selectedLob ? (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-400 italic text-sm bg-slate-50/50">Please select a Business Partner to load the grid.</div>
+            ) : isLoadingData ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 gap-3">
+                    <Loader2 size={30} className="animate-spin text-blue-500" />
+                    <span className="text-sm font-medium">Fetching Pricing & Data...</span>
+                </div>
             ) : (
                 <table className="w-full text-left border-collapse whitespace-nowrap">
                     <thead className="sticky top-0 z-20 shadow-sm text-[10px] uppercase tracking-wider text-slate-500 bg-white">
@@ -367,7 +405,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
             )}
           </div>
           
-          {selectedLob && (
+          {selectedLob && !isLoadingData && (
             <Pagination currentPage={currentPage} totalPages={totalPages} totalItems={filteredGridProducts.length} itemsPerPage={100} onPrev={goToPrevPage} onNext={goToNextPage} />
           )}
       </div>

@@ -32,7 +32,7 @@ export default function FullDashboard({ isActive, dbLobs, dbProducts, dbPricing 
           setIsLoadingData(true);
       }
       router.reload({
-          only: ['dbProducts', 'dbPricing', 'dbEntries', 'dbActualSales'],
+          only: ['dbProducts', 'dbPricingMonth', 'dbEntriesMonth', 'dbActualSales'],
           data: { 
               start_month: dashFilters.startMonth, 
               end_month: dashFilters.endMonth 

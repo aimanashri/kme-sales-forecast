@@ -39,7 +39,7 @@ export default function SummaryByItem({ isActive, dbLobs, dbProducts, dbPricing,
           setIsLoadingData(true);
       }
       router.reload({
-          only: ['dbProducts', 'dbPricing', 'dbEntries'],
+          only: ['dbProducts', 'dbPricingMonth', 'dbEntriesMonth'],
           data: { summary_month: masterMonthFilter },
           onFinish: () => {
               if (showSpinner) {

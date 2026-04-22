@@ -19,7 +19,7 @@ const NavButton = ({ id, label, icon: Icon, activeTab, isSidebarOpen, onClick }:
   </button>
 );
 
-export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbBudgets, dbActualSales }: any) {
+export default function Forecast({ dbLobs, dbProducts, dbPricingLob, dbPricingMonth, dbEntriesLob, dbEntriesMonth, dbBudgets, dbActualSales }: any) {
   const user = usePage().props.auth.user as any; 
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -103,26 +103,26 @@ export default function Forecast({ dbLobs, dbProducts, dbPricing, dbEntries, dbB
 
         <div className="flex-1 overflow-auto p-6" style={{ zoom: 0.80 }}>
           <>
-                  <div className={activeTab === 'data-entry' ? 'block h-full' : 'hidden'}>
-                    <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricing || []} dbEntries={dbEntries || []} />
-                  </div>
-                  <div className={activeTab === 'summary-item' ? 'block h-full' : 'hidden'}>
-                    <SummaryByItem isActive={activeTab === 'summary-item'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricing || []} dbEntries={dbEntries || []} searchTerm={searchTerm} user={user} />
-                  </div>
-                  <div className={activeTab === 'summary-bp' ? 'block h-full' : 'hidden'}>
-                    <SummaryByBP isActive={activeTab === 'summary-bp'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricing || []} dbEntries={dbEntries || []} searchTerm={searchTerm} user={user} />
-                  </div>
-                  
-                  <div className={activeTab === 'summary-lob' ? 'block h-full' : 'hidden'}>
-                    <SummaryByLOB isActive={activeTab === 'summary-lob'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricing || []} dbEntries={dbEntries || []} searchTerm={searchTerm} user={user} />
-                  </div>
-                  
-                  <div className={activeTab === 'dashboard' ? 'block h-full' : 'hidden'}>
-                    <FullDashboard isActive={activeTab === 'dashboard'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbEntries={dbEntries || []} dbActualSales={dbActualSales || []} dbPricing={dbPricing || []} user={user} />
-                  </div>
-                  <div className={activeTab === 'actual-sales' ? 'block h-full' : 'hidden'}>
-                    <ActualSales dbProducts={dbProducts || []} dbEntries={dbEntries || []} dbBudgets={dbBudgets || []} selectedYear={selectedYear} user={user} />
-                  </div>
+            <div className={activeTab === 'data-entry' ? 'block h-full' : 'hidden'}>
+      
+              <SalesDataEntry dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricingLob || []} dbEntries={dbEntriesLob || []} />
+            </div>
+            <div className={activeTab === 'summary-item' ? 'block h-full' : 'hidden'}>
+      
+              <SummaryByItem isActive={activeTab === 'summary-item'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricingMonth || []} dbEntries={dbEntriesMonth || []} searchTerm={searchTerm} user={user} />
+            </div>
+            <div className={activeTab === 'summary-bp' ? 'block h-full' : 'hidden'}>
+      
+              <SummaryByBP isActive={activeTab === 'summary-bp'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricingMonth || []} dbEntries={dbEntriesMonth || []} searchTerm={searchTerm} user={user} />
+            </div>
+            <div className={activeTab === 'summary-lob' ? 'block h-full' : 'hidden'}>
+       
+              <SummaryByLOB isActive={activeTab === 'summary-lob'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbPricing={dbPricingMonth || []} dbEntries={dbEntriesMonth || []} searchTerm={searchTerm} user={user} />
+            </div>
+            <div className={activeTab === 'dashboard' ? 'block h-full' : 'hidden'}>
+              
+              <FullDashboard isActive={activeTab === 'dashboard'} dbLobs={dbLobs} dbProducts={dbProducts || []} dbEntries={dbEntriesMonth || []} dbActualSales={dbActualSales || []} dbPricing={dbPricingMonth || []} user={user} />
+            </div>
               </>
         </div>
       </main>

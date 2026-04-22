@@ -265,7 +265,7 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
                         if (newLobId) {
                             setIsLoadingData(true);
                             router.reload({
-                                only: ['dbProducts', 'dbPricing', 'dbEntries'],
+                                only: ['dbProducts', 'dbPricingLob', 'dbEntriesLob'],
                                 data: { lob_id: newLobId }, // Pass the selected LOB
                                 onFinish: () => setIsLoadingData(false) // preserveState and preserveScroll are true by default!
                             });

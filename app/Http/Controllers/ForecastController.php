@@ -72,9 +72,8 @@ class ForecastController extends Controller
                     return $query->whereIn('product_id', $pricedProductIds)->get();
                 }
 
-                // if Summaries/Dashboard: get products that have Forecasts OR Actual Sales
                 if ($summaryMonth || ($startMonth && $endMonth)) {
-                    // get Forecasted Products
+                    // Forecasted Products
                     $planningQuery = UserPlanning::query()->when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds));
                     if ($summaryMonth) {
                         $planningQuery->where('planning_month', $summaryMonth);
@@ -83,13 +82,16 @@ class ForecastController extends Controller
                     }
                     $forecastProductIds = $planningQuery->pluck('product_id')->toArray();
 
-                    // get Actual Sales Products
-                    $actualProductIds = ActualSale::when(!$isAdmin, fn($q) => $q->where('sales_representative_no', $user->employee_id))
-                        ->pluck('product_id')
-                        ->toArray();
+                    //Actual Sales Products
+                    $actualQuery = ActualSale::when(!$isAdmin, fn($q) => $q->where('sales_representative_no', $user->employee_id));
+                    if ($startMonth && $endMonth) {
+                        $actualQuery->whereBetween('invoice_date', [$startMonth . '-01', date('Y-m-t', strtotime($endMonth . '-01'))]);
+                    } elseif ($summaryMonth) {
+                        $actualQuery->whereBetween('invoice_date', [$summaryMonth . '-01', date('Y-m-t', strtotime($summaryMonth . '-01'))]);
+                    }
+                    $actualProductIds = $actualQuery->pluck('product_id')->toArray();
 
                     $activeProductIds = array_unique(array_merge($forecastProductIds, $actualProductIds));
-
                     return $query->whereIn('product_id', $activeProductIds)->get();
                 }
 
@@ -140,7 +142,19 @@ class ForecastController extends Controller
             },
 
             'dbBudgets' => Inertia::lazy(fn() => CategoryBudget::when(!$isAdmin, fn($q) => $q->where('user_id', $user->user_id))->get()),
-            'dbActualSales' => Inertia::lazy(fn() => ActualSale::when(!$isAdmin, fn($q) => $q->where('sales_representative_no', $user->employee_id))->get()),
+            'dbActualSales' => function () use ($summaryMonth, $startMonth, $endMonth, $isAdmin, $user) {
+                if (!$summaryMonth && !($startMonth && $endMonth)) return [];
+
+                $query = ActualSale::when(!$isAdmin, fn($q) => $q->where('sales_representative_no', $user->employee_id));
+                
+                if ($startMonth && $endMonth) {
+                    $query->whereBetween('invoice_date', [$startMonth . '-01', date('Y-m-t', strtotime($endMonth . '-01'))]);
+                } elseif ($summaryMonth) {
+                    $query->whereBetween('invoice_date', [$summaryMonth . '-01', date('Y-m-t', strtotime($summaryMonth . '-01'))]);
+                }
+                
+                return $query->get();
+            },
         ]);
     }
 

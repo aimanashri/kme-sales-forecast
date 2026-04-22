@@ -35,7 +35,9 @@ export default function FullDashboard({ isActive, dbLobs, dbProducts, dbPricing 
           only: ['dbProducts', 'dbPricingMonth', 'dbEntriesMonth', 'dbActualSales'],
           data: { 
               start_month: dashFilters.startMonth, 
-              end_month: dashFilters.endMonth 
+              end_month: dashFilters.endMonth,
+              summary_month: '', 
+              lob_id: ''        
           },
           onFinish: () => {
               if (showSpinner) {

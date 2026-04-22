@@ -52,7 +52,8 @@ class ForecastController extends Controller
         return Inertia::render('Forecast/Forecast', [
             'dbLobs' => $allowedLobs,
 
-            'dbProducts' => function () use ($requestedLobId, $summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
+            // fetch only the products needed for the active tab!
+            'dbProducts' => function () use ($requestedLobId, $summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin, $user) {
                 $query = Product::select(
                     'product_id', 'item_code', 'product_model', 'item_description',
                 'product_category', 'product_line', 'item_group', 'brand',
@@ -60,25 +61,39 @@ class ForecastController extends Controller
                 'avg_12m_sales', 'avg_6m_sales', 'avg_3m_sales'
                 );
 
+
+                // if Sales Data Entry: only get products priced for this specific LOB
                 if ($requestedLobId) {
                     $pricedProductIds = ProductPrice::where('lob_id', $requestedLobId)
                         ->orWhereNull('lob_id')
-                        ->pluck('product_id')->unique();
+                        ->pluck('product_id')
+                        ->unique();
+
                     return $query->whereIn('product_id', $pricedProductIds)->get();
                 }
 
+                // if Summaries/Dashboard: get products that have Forecasts OR Actual Sales
                 if ($summaryMonth || ($startMonth && $endMonth)) {
+                    // get Forecasted Products
                     $planningQuery = UserPlanning::query()->when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds));
                     if ($summaryMonth) {
                         $planningQuery->where('planning_month', $summaryMonth);
                     } else {
                         $planningQuery->whereBetween('planning_month', [$startMonth, $endMonth]);
                     }
-                    $activeProductIds = $planningQuery->pluck('product_id')->unique();
+                    $forecastProductIds = $planningQuery->pluck('product_id')->toArray();
+
+                    // get Actual Sales Products
+                    $actualProductIds = ActualSale::when(!$isAdmin, fn($q) => $q->where('sales_representative_no', $user->employee_id))
+                        ->pluck('product_id')
+                        ->toArray();
+
+                    $activeProductIds = array_unique(array_merge($forecastProductIds, $actualProductIds));
+
                     return $query->whereIn('product_id', $activeProductIds)->get();
                 }
 
-                return []; 
+                return [];
             },
 
             'dbPricingLob' => function () use ($requestedLobId) {

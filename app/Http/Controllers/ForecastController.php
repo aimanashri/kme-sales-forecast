@@ -54,12 +54,41 @@ class ForecastController extends Controller
             'dbLobs' => $allowedLobs,
 
             // pass lazily for heavy data
-            'dbProducts' => Inertia::lazy(fn() => Product::select(
-                'product_id', 'item_code', 'product_model', 'item_description',
+            // fetch only the products needed for the active tab!
+            'dbProducts' => Inertia::lazy(function () use ($requestedLobId, $summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
+                $query = Product::select(
+                    'product_id', 'item_code', 'product_model', 'item_description',
                 'product_category', 'product_line', 'item_group', 'brand',
                 'cogs_price', 'cogs_currency', 'kmi_qty', 'kme_qty', 'total_qty',
                 'avg_12m_sales', 'avg_6m_sales', 'avg_3m_sales'
-            )->get()),
+                );
+
+                // if Sales Data Entry: only get products priced for this specific LOB
+                if ($requestedLobId) {
+                    $pricedProductIds = ProductPrice::where('lob_id', $requestedLobId)
+                        ->orWhereNull('lob_id')
+                        ->pluck('product_id')
+                        ->unique();
+
+                    return $query->whereIn('product_id', $pricedProductIds)->get();
+                }
+
+                // if Summaries/Dashboard: only get products that actually have forecasts
+                if ($summaryMonth || ($startMonth && $endMonth)) {
+                    $planningQuery = UserPlanning::query()->when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds));
+
+                    if ($summaryMonth) {
+                        $planningQuery->where('planning_month', $summaryMonth);
+                    } else {
+                        $planningQuery->whereBetween('planning_month', [$startMonth, $endMonth]);
+                    }
+
+                    $activeProductIds = $planningQuery->pluck('product_id')->unique();
+                    return $query->whereIn('product_id', $activeProductIds)->get();
+                }
+
+                return []; 
+            }),
 
             // fetch prices only for Sales Data Entry (By LOB)
             'dbPricingLob' => Inertia::lazy(function () use ($requestedLobId) {

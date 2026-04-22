@@ -209,15 +209,12 @@ export default function SalesDataEntry({ dbLobs, dbProducts, dbPricing, dbEntrie
       setIsSaving(true);
       router.post(route('forecast.store'), { entries: payloadEntries }, {
           preserveScroll: true,
+          preserveState: true, 
           onSuccess: () => {
               showNotification(`Saved ${payloadEntries.length} entries successfully!`);
               setEdits({}); 
               setRecentMonthFilter(planningMonth); 
-              router.reload({
-                  only: ['dbEntries'],
-                  data: { lob_id: selectedLob },
-                  onFinish: () => setIsSaving(false)
-              });
+              setIsSaving(false);
           },
           onError: () => { showNotification('Error saving entries.'); setIsSaving(false); }
       });

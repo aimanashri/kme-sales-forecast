@@ -50,12 +50,9 @@ class ForecastController extends Controller
         $endMonth = $request->input('end_month');
 
         return Inertia::render('Forecast/Forecast', [
-            // pass immediately (lightweight)
             'dbLobs' => $allowedLobs,
 
-            // pass lazily for heavy data
-            // fetch only the products needed for the active tab!
-            'dbProducts' => Inertia::lazy(function () use ($requestedLobId, $summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
+            'dbProducts' => function () use ($requestedLobId, $summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
                 $query = Product::select(
                     'product_id', 'item_code', 'product_model', 'item_description',
                 'product_category', 'product_line', 'item_group', 'brand',
@@ -63,35 +60,28 @@ class ForecastController extends Controller
                 'avg_12m_sales', 'avg_6m_sales', 'avg_3m_sales'
                 );
 
-                // if Sales Data Entry: only get products priced for this specific LOB
                 if ($requestedLobId) {
                     $pricedProductIds = ProductPrice::where('lob_id', $requestedLobId)
                         ->orWhereNull('lob_id')
-                        ->pluck('product_id')
-                        ->unique();
-
+                        ->pluck('product_id')->unique();
                     return $query->whereIn('product_id', $pricedProductIds)->get();
                 }
 
-                // if Summaries/Dashboard: only get products that actually have forecasts
                 if ($summaryMonth || ($startMonth && $endMonth)) {
                     $planningQuery = UserPlanning::query()->when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds));
-
                     if ($summaryMonth) {
                         $planningQuery->where('planning_month', $summaryMonth);
                     } else {
                         $planningQuery->whereBetween('planning_month', [$startMonth, $endMonth]);
                     }
-
                     $activeProductIds = $planningQuery->pluck('product_id')->unique();
                     return $query->whereIn('product_id', $activeProductIds)->get();
                 }
 
                 return []; 
-            }),
+            },
 
-            // fetch prices only for Sales Data Entry (By LOB)
-            'dbPricingLob' => Inertia::lazy(function () use ($requestedLobId) {
+            'dbPricingLob' => function () use ($requestedLobId) {
                 if ($requestedLobId) {
                     return ProductPrice::where('lob_id', $requestedLobId)
                         ->orWhereNull('lob_id')
@@ -99,29 +89,25 @@ class ForecastController extends Controller
                         ->get();
                 }
                 return [];
-            }),
+            },
 
-            // fetch prices only for Summaries & Dashboard (By Month)
-            'dbPricingMonth' => Inertia::lazy(function () use ($summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
+            'dbPricingMonth' => function () use ($summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
                 if ($summaryMonth || ($startMonth && $endMonth)) {
                     $query = UserPlanning::query()->when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds));
-
                     if ($summaryMonth) {
                         $query->where('planning_month', $summaryMonth);
                     } else {
                         $query->whereBetween('planning_month', [$startMonth, $endMonth]);
                     }
-
                     $activeProductIds = $query->pluck('product_id')->unique();
                     return ProductPrice::whereIn('product_id', $activeProductIds)
                         ->select('product_id', 'lob_id', 'price')
                         ->get();
                 }
                 return [];
-            }),
+            },
 
-            // fetch entries only for Sales Data Entry (By LOB)
-            'dbEntriesLob' => Inertia::lazy(function () use ($requestedLobId, $allowedLobIds, $isAdmin) {
+            'dbEntriesLob' => function () use ($requestedLobId, $allowedLobIds, $isAdmin) {
                 if ($requestedLobId) {
                     return UserPlanning::when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds))
                         ->where('lob_id', $requestedLobId)
@@ -129,17 +115,14 @@ class ForecastController extends Controller
                         ->get();
                 }
                 return [];
-            }),
+            },
 
-            // fetch entries only for Summaries & Dashboard (By Month)
-            'dbEntriesMonth' => Inertia::lazy(function () use ($summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
+            'dbEntriesMonth' => function () use ($summaryMonth, $startMonth, $endMonth, $allowedLobIds, $isAdmin) {
                 $query = UserPlanning::query()->when(!$isAdmin, fn($q) => $q->whereIn('lob_id', $allowedLobIds));
-
                 if ($summaryMonth) return $query->where('planning_month', $summaryMonth)->orderBy('created_at', 'desc')->get();
                 if ($startMonth && $endMonth) return $query->whereBetween('planning_month', [$startMonth, $endMonth])->orderBy('created_at', 'desc')->get();
-
                 return [];
-            }),
+            },
 
             'dbBudgets' => Inertia::lazy(fn() => CategoryBudget::when(!$isAdmin, fn($q) => $q->where('user_id', $user->user_id))->get()),
             'dbActualSales' => Inertia::lazy(fn() => ActualSale::when(!$isAdmin, fn($q) => $q->where('sales_representative_no', $user->employee_id))->get()),
